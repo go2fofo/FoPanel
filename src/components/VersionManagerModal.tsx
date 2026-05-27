@@ -66,6 +66,7 @@ export function VersionManagerModal({
   const [name, setName] = useState<string>('')
   const [items, setItems] = useState<RuntimeProfileItem[]>([])
   const [statuses, setStatuses] = useState<InstallerStatus[]>([])
+  const [overrides, setOverrides] = useState<Record<string, string>>({})
   const [log, setLog] = useState<string>('')
   const [saving, setSaving] = useState(false)
   const [installing, setInstalling] = useState(false)
@@ -77,12 +78,14 @@ export function VersionManagerModal({
   }, [statuses])
 
   const loadAll = useCallback(async () => {
-    const [p, s] = await Promise.all([
+    const [p, s, o] = await Promise.all([
       invoke<RuntimeProfile[]>('list_runtime_profiles'),
       invoke<InstallerStatus[]>('get_installer_status'),
+      invoke<Record<string, string>>('get_installer_overrides'),
     ])
     setProfiles(p)
     setStatuses(s)
+    setOverrides(o || {})
     const first = p[0]
     if (first) {
       setSelectedId(first.id)
@@ -223,6 +226,57 @@ export function VersionManagerModal({
     })
   }, [])
 
+  const setInstallerPath = useCallback(
+    (installer: string) => {
+      let value = overrides[installer] || ''
+      Modal.confirm({
+        title: '指定安装器路径',
+        content: (
+          <div style={{ display: 'grid', gap: 8 }}>
+            <Typography.Text type="secondary">
+              当安装器不在 PATH 或 FoPanel 无法自动识别时，可手动指定可执行文件路径。
+            </Typography.Text>
+            <Input
+              defaultValue={value}
+              placeholder="例如：C:\\Program Files\\nvm\\nvm.exe"
+              onChange={(e) => {
+                value = e.target.value
+              }}
+            />
+          </div>
+        ),
+        okText: '保存',
+        cancelText: '取消',
+        async onOk() {
+          const p = (value || '').trim()
+          if (!p) return
+          await invoke('set_installer_override', { installer, path: p })
+          await loadAll()
+          setLog(`已为 ${installer} 设置路径：${p}`)
+        },
+      })
+    },
+    [loadAll, overrides],
+  )
+
+  const clearInstallerPath = useCallback(
+    (installer: string) => {
+      Modal.confirm({
+        title: '清除安装器路径',
+        content: `确认清除 ${installer} 的手动路径配置？`,
+        okText: '清除',
+        okButtonProps: { danger: true },
+        cancelText: '取消',
+        async onOk() {
+          await invoke('clear_installer_override', { installer })
+          await loadAll()
+          setLog(`已清除 ${installer} 的路径配置。`)
+        },
+      })
+    },
+    [loadAll],
+  )
+
   return (
     <Modal open={open} title="语言版本管理" onCancel={onClose} footer={null} width={1040}>
       <div style={{ display: 'grid', gap: 12 }}>
@@ -285,6 +339,7 @@ export function VersionManagerModal({
               render: (v, record, idx) => {
                 const opts = installerOptions(record.language).map((x) => ({ value: x, label: x }))
                 const st = statusMap[String(v)]
+                const override = overrides[String(v)]
                 return (
                   <Space wrap>
                     <Select
@@ -297,6 +352,15 @@ export function VersionManagerModal({
                       <Tag color="green">已安装</Tag>
                     ) : (
                       <Tag color="red">未安装</Tag>
+                    )}
+                    {override ? (
+                      <Button type="link" onClick={() => clearInstallerPath(String(v))}>
+                        清除路径
+                      </Button>
+                    ) : (
+                      <Button type="link" onClick={() => setInstallerPath(String(v))}>
+                        指定路径
+                      </Button>
                     )}
                   </Space>
                 )

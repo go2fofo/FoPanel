@@ -131,8 +131,9 @@ pub struct InstallerOption {
 }
 
 #[tauri::command]
-pub fn list_installers(language: String) -> Result<Vec<InstallerOption>, String> {
+pub fn list_installers(app: AppHandle, language: String) -> Result<Vec<InstallerOption>, String> {
   let mut out = Vec::<InstallerOption>::new();
+  let overrides = load_installer_overrides(&app)?;
 
   match language.as_str() {
     "node" => {
@@ -143,7 +144,7 @@ pub fn list_installers(language: String) -> Result<Vec<InstallerOption>, String>
           description: "通过 fnm 安装与管理 Node 版本。".to_string(),
         });
       }
-      if (cfg!(windows) && nvm_exe_path().is_some()) || (!cfg!(windows) && nvm_sh_exists()) {
+      if (cfg!(windows) && nvm_exe_path(&overrides).is_some()) || (!cfg!(windows) && nvm_sh_exists()) {
         out.push(InstallerOption {
           id: "nvm".to_string(),
           label: "nvm".to_string(),
@@ -194,7 +195,7 @@ pub fn list_installers(language: String) -> Result<Vec<InstallerOption>, String>
       }
     }
     "php" => {
-      if has_command("phpenv") {
+      if has_command("phpenv") || overrides.get("phpenv").is_some() {
         out.push(InstallerOption {
           id: "phpenv".to_string(),
           label: "phpenv".to_string(),
@@ -218,7 +219,7 @@ pub fn list_installers(language: String) -> Result<Vec<InstallerOption>, String>
       }
     }
     "java" => {
-      if !cfg!(windows) && sdkman_is_available() {
+      if !cfg!(windows) && (sdkman_is_available() || overrides.get("sdkman").is_some()) {
         out.push(InstallerOption {
           id: "sdkman".to_string(),
           label: "SDKMAN".to_string(),
@@ -265,20 +266,26 @@ pub fn list_installers(language: String) -> Result<Vec<InstallerOption>, String>
 }
 
 #[tauri::command]
-pub fn install_runtime(language: String, installer: String, version: String) -> Result<String, String> {
+pub fn install_runtime(
+  app: AppHandle,
+  language: String,
+  installer: String,
+  version: String,
+) -> Result<String, String> {
+  let overrides = load_installer_overrides(&app)?;
   let output = match (language.as_str(), installer.as_str()) {
     ("node", "fnm") => run_install_fnm(&version)?,
-    ("node", "nvm") => run_install_nvm(&version)?,
+    ("node", "nvm") => run_install_nvm(&version, &overrides)?,
     ("python", "pyenv") => run_install_pyenv(&version)?,
     ("rust", "rustup") => run_install_rustup(&version)?,
     ("bun", "homebrew") => run_install_homebrew("oven-sh/bun/bun", &version)?,
     ("deno", "homebrew") => run_install_homebrew("deno", &version)?,
     ("go", "homebrew") => run_install_homebrew("go", &version)?,
     ("go", "goenv") => run_install_goenv(&version)?,
-    ("php", "phpenv") => run_install_phpenv(&version)?,
+    ("php", "phpenv") => run_install_phpenv(&version, &overrides)?,
     ("php", "homebrew") => run_install_homebrew(&homebrew_php_formula(&version), &version)?,
     ("java", "homebrew") => run_install_homebrew(&homebrew_java_formula(&version), &version)?,
-    ("java", "sdkman") => run_install_sdkman_java(&version)?,
+    ("java", "sdkman") => run_install_sdkman_java(&version, &overrides)?,
     ("bun", "winget") => run_install_winget("Oven-sh.Bun", &version)?,
     ("deno", "winget") => run_install_winget("DenoLand.Deno", &version)?,
     ("go", "winget") => run_install_winget("GoLang.Go", &version)?,
@@ -338,8 +345,9 @@ pub struct InstallerStatus {
 }
 
 #[tauri::command]
-pub fn get_installer_status() -> Result<Vec<InstallerStatus>, String> {
+pub fn get_installer_status(app: AppHandle) -> Result<Vec<InstallerStatus>, String> {
   let mut out = Vec::<InstallerStatus>::new();
+  let overrides = load_installer_overrides(&app)?;
 
   let brew = has_command("brew");
   let winget = has_command("winget");
@@ -361,7 +369,11 @@ pub fn get_installer_status() -> Result<Vec<InstallerStatus>, String> {
   });
   out.push(InstallerStatus {
     id: "nvm".to_string(),
-    installed: if cfg!(windows) { nvm_exe_path().is_some() } else { nvm_sh_exists() },
+    installed: if cfg!(windows) {
+      nvm_exe_path(&overrides).is_some()
+    } else {
+      nvm_sh_exists()
+    },
     hint: installer_bootstrap_hint("nvm", brew, winget),
   });
   out.push(InstallerStatus {
@@ -381,16 +393,39 @@ pub fn get_installer_status() -> Result<Vec<InstallerStatus>, String> {
   });
   out.push(InstallerStatus {
     id: "phpenv".to_string(),
-    installed: has_command("phpenv"),
+    installed: has_command("phpenv") || overrides.get("phpenv").is_some(),
     hint: installer_bootstrap_hint("phpenv", brew, winget),
   });
   out.push(InstallerStatus {
     id: "sdkman".to_string(),
-    installed: !cfg!(windows) && sdkman_is_available(),
+    installed: (!cfg!(windows) && sdkman_is_available()) || overrides.get("sdkman").is_some(),
     hint: installer_bootstrap_hint("sdkman", brew, winget),
   });
 
   Ok(out)
+}
+
+#[tauri::command]
+pub fn get_installer_overrides(app: AppHandle) -> Result<HashMap<String, String>, String> {
+  load_installer_overrides(&app)
+}
+
+#[tauri::command]
+pub fn set_installer_override(app: AppHandle, installer: String, path: String) -> Result<(), String> {
+  let p = PathBuf::from(path.trim());
+  if !p.exists() || !p.is_file() {
+    return Err("路径不存在或不是文件".to_string());
+  }
+  let mut map = load_installer_overrides(&app)?;
+  map.insert(installer, p.to_string_lossy().to_string());
+  save_installer_overrides(&app, &map)
+}
+
+#[tauri::command]
+pub fn clear_installer_override(app: AppHandle, installer: String) -> Result<(), String> {
+  let mut map = load_installer_overrides(&app)?;
+  map.remove(&installer);
+  save_installer_overrides(&app, &map)
 }
 
 #[tauri::command]
@@ -407,15 +442,16 @@ pub fn uninstall_runtime(app: AppHandle, runtime: ActivateRuntimeInput) -> Resul
     return Ok("已删除".to_string());
   }
 
+  let overrides = load_installer_overrides(&app)?;
   let output = match (runtime.language.as_str(), runtime.source.as_str()) {
     ("node", "fnm") => run_uninstall_fnm(&runtime.version)?,
-    ("node", "nvm") => run_uninstall_nvm(&runtime.version)?,
+    ("node", "nvm") => run_uninstall_nvm(&runtime.version, &overrides)?,
     ("python", "pyenv") => run_uninstall_pyenv(&runtime.version)?,
     ("rust", "rustup") => run_uninstall_rustup(&runtime.version)?,
     ("go", "goenv") => run_uninstall_goenv(&runtime.version)?,
-    ("php", "phpenv") => run_uninstall_phpenv(&runtime.version)?,
+    ("php", "phpenv") => run_uninstall_phpenv(&runtime.version, &overrides)?,
     ("java", "homebrew") => run_uninstall_homebrew(&homebrew_java_formula(&runtime.version))?,
-    ("java", "sdkman") => run_uninstall_sdkman_java(&runtime.version)?,
+    ("java", "sdkman") => run_uninstall_sdkman_java(&runtime.version, &overrides)?,
     ("java", "winget") => {
       let major = java_major_from_version(&runtime.version).unwrap_or(21);
       run_uninstall_winget(&winget_java_id(major))?
@@ -1119,6 +1155,27 @@ fn profiles_file_path(app: &AppHandle) -> Result<PathBuf, String> {
   let dir = app_data_dir(app)?;
   ensure_dir(&dir)?;
   Ok(dir.join("runtimes.profiles.json"))
+}
+
+fn installer_overrides_file_path(app: &AppHandle) -> Result<PathBuf, String> {
+  let dir = app_data_dir(app)?;
+  ensure_dir(&dir)?;
+  Ok(dir.join("installers.overrides.json"))
+}
+
+fn load_installer_overrides(app: &AppHandle) -> Result<HashMap<String, String>, String> {
+  let file = installer_overrides_file_path(app)?;
+  if !file.exists() {
+    return Ok(HashMap::new());
+  }
+  let text = fs::read_to_string(&file).map_err(|e| e.to_string())?;
+  serde_json::from_str(&text).map_err(|e| e.to_string())
+}
+
+fn save_installer_overrides(app: &AppHandle, map: &HashMap<String, String>) -> Result<(), String> {
+  let file = installer_overrides_file_path(app)?;
+  let json = serde_json::to_string_pretty(map).map_err(|e| e.to_string())?;
+  fs::write(file, json).map_err(|e| e.to_string())
 }
 
 fn default_profiles() -> Vec<RuntimeProfile> {
@@ -2119,7 +2176,13 @@ fn nvm_sh_exists() -> bool {
   false
 }
 
-fn nvm_exe_path() -> Option<PathBuf> {
+fn nvm_exe_path(overrides: &HashMap<String, String>) -> Option<PathBuf> {
+  if let Some(p) = overrides.get("nvm") {
+    let p = PathBuf::from(p);
+    if p.exists() {
+      return Some(p);
+    }
+  }
   if let Some(p) = find_in_path("nvm") {
     return Some(p);
   }
@@ -2142,8 +2205,8 @@ fn nvm_exe_path() -> Option<PathBuf> {
   None
 }
 
-fn nvm_program() -> Result<String, String> {
-  nvm_exe_path()
+fn nvm_program(overrides: &HashMap<String, String>) -> Result<String, String> {
+  nvm_exe_path(overrides)
     .map(|p| p.to_string_lossy().to_string())
     .ok_or_else(|| "未找到 nvm（nvm-windows）。如果你已安装但 FoPanel 未识别：请把 nvm.exe 所在目录加入 PATH，或设置 NVM_HOME 环境变量指向 nvm 安装目录。".to_string())
 }
@@ -2156,9 +2219,9 @@ fn run_install_fnm(version: &str) -> Result<String, String> {
   Ok(merge_output(&out).0.trim().to_string())
 }
 
-fn run_install_nvm(version: &str) -> Result<String, String> {
+fn run_install_nvm(version: &str, overrides: &HashMap<String, String>) -> Result<String, String> {
   if cfg!(windows) {
-    let out = Command::new(nvm_program()?)
+    let out = Command::new(nvm_program(overrides)?)
       .args(["install", version])
       .output()
       .map_err(|e| e.to_string())?;
@@ -2254,31 +2317,37 @@ fn goenv_has_uninstall() -> Result<bool, String> {
   Ok(text.lines().any(|l| l.trim() == "uninstall"))
 }
 
-fn run_install_phpenv(version: &str) -> Result<String, String> {
+fn run_install_phpenv(version: &str, overrides: &HashMap<String, String>) -> Result<String, String> {
   let v = version.trim();
   if v.is_empty() || v == "latest" || v == "stable" {
     return Err("phpenv 需要明确版本号（例如 8.4.0）".to_string());
   }
-  let out = Command::new("phpenv")
+  let program = overrides.get("phpenv").map(|x| x.as_str()).unwrap_or("phpenv");
+  let out = Command::new(program)
     .args(["install", v])
     .output()
     .map_err(|e| e.to_string())?;
   Ok(merge_output(&out).0.trim().to_string())
 }
 
-fn run_uninstall_phpenv(version: &str) -> Result<String, String> {
-  if !phpenv_has_uninstall()? {
+fn run_uninstall_phpenv(
+  version: &str,
+  overrides: &HashMap<String, String>,
+) -> Result<String, String> {
+  if !phpenv_has_uninstall(overrides)? {
     return Err("当前 phpenv 未提供 uninstall 命令，请安装 phpenv-uninstall 或手动删除版本目录".to_string());
   }
-  let out = Command::new("phpenv")
+  let program = overrides.get("phpenv").map(|x| x.as_str()).unwrap_or("phpenv");
+  let out = Command::new(program)
     .args(["uninstall", "-f", version])
     .output()
     .map_err(|e| e.to_string())?;
   Ok(merge_output(&out).0.trim().to_string())
 }
 
-fn phpenv_has_uninstall() -> Result<bool, String> {
-  let out = Command::new("phpenv")
+fn phpenv_has_uninstall(overrides: &HashMap<String, String>) -> Result<bool, String> {
+  let program = overrides.get("phpenv").map(|x| x.as_str()).unwrap_or("phpenv");
+  let out = Command::new(program)
     .args(["commands"])
     .output()
     .map_err(|e| e.to_string())?;
@@ -2301,7 +2370,27 @@ fn sdkman_is_available() -> bool {
   t == "function" || t == "file"
 }
 
-fn run_install_sdkman_java(candidate: &str) -> Result<String, String> {
+fn sdkman_source_line(overrides: &HashMap<String, String>) -> String {
+  if let Some(p) = overrides.get("sdkman") {
+    let p = PathBuf::from(p);
+    if p.exists() {
+      if let Some(dir) = p.parent().and_then(|x| x.parent()) {
+        return format!(
+          "export SDKMAN_DIR={d}; source {s}",
+          d = shell_escape(dir.to_string_lossy().as_ref()),
+          s = shell_escape(p.to_string_lossy().as_ref())
+        );
+      }
+      return format!("source {}", shell_escape(p.to_string_lossy().as_ref()));
+    }
+  }
+  "export SDKMAN_DIR=\"${SDKMAN_DIR:-$HOME/.sdkman}\"; source \"$SDKMAN_DIR/bin/sdkman-init.sh\"".to_string()
+}
+
+fn run_install_sdkman_java(
+  candidate: &str,
+  overrides: &HashMap<String, String>,
+) -> Result<String, String> {
   if cfg!(windows) {
     return Err("Windows 不支持直接使用 SDKMAN（建议使用 winget，或在 WSL 中安装 SDKMAN）".to_string());
   }
@@ -2309,8 +2398,10 @@ fn run_install_sdkman_java(candidate: &str) -> Result<String, String> {
   if c.is_empty() || c == "latest" || c == "stable" {
     return Err("SDKMAN 需要 Java candidate（例如 21.0.2-tem / 17.0.10-zulu）".to_string());
   }
+  let source = sdkman_source_line(overrides);
   let script = format!(
-    "export SDKMAN_DIR=\"${{SDKMAN_DIR:-$HOME/.sdkman}}\"; export SDKMAN_NON_INTERACTIVE=true; source \"$SDKMAN_DIR/bin/sdkman-init.sh\"; sdk install java {c}",
+    "{source}; export SDKMAN_NON_INTERACTIVE=true; sdk install java {c}",
+    source = source,
     c = shell_escape(c)
   );
   let out = Command::new("bash")
@@ -2320,7 +2411,10 @@ fn run_install_sdkman_java(candidate: &str) -> Result<String, String> {
   Ok(merge_output(&out).0.trim().to_string())
 }
 
-fn run_uninstall_sdkman_java(candidate: &str) -> Result<String, String> {
+fn run_uninstall_sdkman_java(
+  candidate: &str,
+  overrides: &HashMap<String, String>,
+) -> Result<String, String> {
   if cfg!(windows) {
     return Err("Windows 不支持直接使用 SDKMAN（建议使用 winget，或在 WSL 中安装 SDKMAN）".to_string());
   }
@@ -2328,8 +2422,10 @@ fn run_uninstall_sdkman_java(candidate: &str) -> Result<String, String> {
   if c.is_empty() || c == "latest" || c == "stable" {
     return Err("SDKMAN 需要 Java candidate（例如 21.0.2-tem / 17.0.10-zulu）".to_string());
   }
+  let source = sdkman_source_line(overrides);
   let script = format!(
-    "export SDKMAN_DIR=\"${{SDKMAN_DIR:-$HOME/.sdkman}}\"; export SDKMAN_NON_INTERACTIVE=true; source \"$SDKMAN_DIR/bin/sdkman-init.sh\"; sdk uninstall java {c}",
+    "{source}; export SDKMAN_NON_INTERACTIVE=true; sdk uninstall java {c}",
+    source = source,
     c = shell_escape(c)
   );
   let out = Command::new("bash")
@@ -2455,14 +2551,14 @@ fn run_uninstall_fnm(version: &str) -> Result<String, String> {
   Ok(merge_output(&out).0.trim().to_string())
 }
 
-fn run_uninstall_nvm(version: &str) -> Result<String, String> {
+fn run_uninstall_nvm(version: &str, overrides: &HashMap<String, String>) -> Result<String, String> {
   let v = if version.starts_with('v') {
     version.to_string()
   } else {
     format!("v{}", version)
   };
   if cfg!(windows) {
-    let p = nvm_program()?;
+    let p = nvm_program(overrides)?;
     let out = Command::new(&p)
       .args(["uninstall", &v])
       .output()
