@@ -43,6 +43,8 @@ pub fn run() {
       commands::runtime_cmds::delete_runtime_profile,
       commands::runtime_cmds::get_installer_status,
       commands::runtime_cmds::get_installer_bootstrap,
+      commands::runtime_cmds::get_installer_env_config,
+      commands::runtime_cmds::install_installer,
       commands::runtime_cmds::get_installer_overrides,
       commands::runtime_cmds::set_installer_override,
       commands::runtime_cmds::clear_installer_override,

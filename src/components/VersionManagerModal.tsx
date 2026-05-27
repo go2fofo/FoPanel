@@ -259,6 +259,56 @@ export function VersionManagerModal({
     [loadAll, overrides],
   )
 
+  const installInstaller = useCallback(
+    (installer: string) => {
+      const st = statusMap[String(installer)]
+      const hint = st?.hint || ''
+      Modal.confirm({
+        title: '一键安装安装器',
+        content: (
+          <div style={{ display: 'grid', gap: 8 }}>
+            <Typography.Text type="secondary">
+              FoPanel 会尝试自动执行安装命令。若不支持自动安装，请复制命令到终端执行。
+            </Typography.Text>
+            <Typography.Paragraph className="mono" copyable={{ text: hint }}>
+              {hint || '-'}
+            </Typography.Paragraph>
+          </div>
+        ),
+        okText: '开始安装',
+        cancelText: '取消',
+        async onOk() {
+          try {
+            const out = await invoke<string>('install_installer', { installer })
+            await loadAll()
+            setLog(`安装器 ${installer} 安装完成：\n${out}`)
+          } catch (e: any) {
+            setLog(`安装器 ${installer} 安装失败：${String(e)}`)
+          }
+        },
+      })
+    },
+    [loadAll, statusMap],
+  )
+
+  const showInstallerEnvConfig = useCallback((installer: string) => {
+    ;(async () => {
+      const text = await invoke<string>('get_installer_env_config', { installer })
+      Modal.confirm({
+        title: '环境配置',
+        content: (
+          <Typography.Paragraph className="mono" copyable style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>
+            {text || '-'}
+          </Typography.Paragraph>
+        ),
+        okText: '关闭',
+        cancelButtonProps: { style: { display: 'none' } },
+      })
+    })().catch((e: any) => {
+      setLog(`获取环境配置失败：${String(e)}`)
+    })
+  }, [])
+
   const clearInstallerPath = useCallback(
     (installer: string) => {
       Modal.confirm({
@@ -353,6 +403,16 @@ export function VersionManagerModal({
                     ) : (
                       <Tag color="red">未安装</Tag>
                     )}
+                    {!st?.installed ? (
+                      <Space size={0}>
+                        <Button type="link" onClick={() => installInstaller(String(v))}>
+                          一键安装
+                        </Button>
+                        <Button type="link" onClick={() => showInstallerEnvConfig(String(v))}>
+                          环境配置
+                        </Button>
+                      </Space>
+                    ) : null}
                     {override ? (
                       <Button type="link" onClick={() => clearInstallerPath(String(v))}>
                         清除路径

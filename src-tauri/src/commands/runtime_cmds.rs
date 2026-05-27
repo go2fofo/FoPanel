@@ -436,6 +436,21 @@ pub fn get_installer_bootstrap(installer: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+pub fn get_installer_env_config(installer: String) -> Result<String, String> {
+  Ok(installer_env_config(&installer))
+}
+
+#[tauri::command]
+pub fn install_installer(installer: String) -> Result<String, String> {
+  let brew = has_command("brew");
+  let winget = has_command("winget");
+  let Some(cmd) = installer_install_command(&installer, brew, winget) else {
+    return Err("该安装器不支持自动安装，请按“安装建议”在终端执行。".to_string());
+  };
+  run_login_shell(&cmd)
+}
+
+#[tauri::command]
 pub fn uninstall_runtime(app: AppHandle, runtime: ActivateRuntimeInput) -> Result<String, String> {
   if runtime.source == "manual" {
     remove_runtime(app, runtime)?;
@@ -1447,6 +1462,9 @@ fn installer_bootstrap_hint(installer: &str, brew: bool, winget: bool) -> String
         }
         return "请先安装 winget 或手动安装 nvm-windows\n若已安装但未识别：请把 nvm.exe 所在目录加入 PATH，或设置 NVM_HOME 环境变量".to_string();
       }
+      if brew {
+        return "brew install nvm".to_string();
+      }
       "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash".to_string()
     }
     "pyenv" => {
@@ -1492,6 +1510,147 @@ fn installer_bootstrap_hint(installer: &str, brew: bool, winget: bool) -> String
       "curl -s \"https://get.sdkman.io\" | bash && source \"$HOME/.sdkman/bin/sdkman-init.sh\"".to_string()
     }
     _ => "未知安装器".to_string(),
+  }
+}
+
+fn installer_install_command(installer: &str, brew: bool, winget: bool) -> Option<String> {
+  match installer {
+    "homebrew" => None,
+    "winget" => None,
+    "fnm" => {
+      if cfg!(windows) {
+        if winget {
+          return Some("winget install Schniz.fnm".to_string());
+        }
+        return None;
+      }
+      if brew {
+        return Some("brew install fnm".to_string());
+      }
+      Some("curl -fsSL https://fnm.vercel.app/install | bash".to_string())
+    }
+    "nvm" => {
+      if cfg!(windows) {
+        if winget {
+          return Some("winget install CoreyButler.NVMforWindows".to_string());
+        }
+        return None;
+      }
+      if brew {
+        return Some("brew install nvm".to_string());
+      }
+      Some("curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash".to_string())
+    }
+    "pyenv" => {
+      if cfg!(windows) {
+        return None;
+      }
+      if brew {
+        return Some("brew install pyenv".to_string());
+      }
+      None
+    }
+    "rustup" => {
+      if cfg!(windows) {
+        if winget {
+          return Some("winget install Rustlang.Rustup".to_string());
+        }
+        return None;
+      }
+      Some("curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y".to_string())
+    }
+    "goenv" => {
+      if cfg!(windows) {
+        return None;
+      }
+      if brew {
+        return Some("brew install goenv".to_string());
+      }
+      None
+    }
+    "phpenv" => {
+      if cfg!(windows) {
+        return None;
+      }
+      if brew {
+        return Some("brew install phpenv".to_string());
+      }
+      None
+    }
+    "sdkman" => {
+      if cfg!(windows) {
+        return None;
+      }
+      Some("curl -s \"https://get.sdkman.io\" | bash".to_string())
+    }
+    _ => None,
+  }
+}
+
+fn installer_env_config(installer: &str) -> String {
+  match installer {
+    "homebrew" => {
+      if cfg!(windows) {
+        return "Homebrew 仅适用于 macOS/Linux。".to_string();
+      }
+      "安装后请重新打开终端；如果 brew 命令仍不可用，请把 Homebrew 的 shellenv 输出加入你的 shell 配置文件（例如 ~/.zshrc）。常用命令：\n(eval \"$(/opt/homebrew/bin/brew shellenv)\")".to_string()
+    }
+    "winget" => {
+      if cfg!(windows) {
+        return "winget 属于 Windows 的 App Installer。安装后建议重启 FoPanel；如果仍不可用，请检查系统 PATH 或更新 App Installer。".to_string();
+      }
+      "winget 仅适用于 Windows。".to_string()
+    }
+    "fnm" => {
+      if cfg!(windows) {
+        "安装后请重启 FoPanel；如果未识别，请把 fnm.exe 所在目录加入 PATH。".to_string()
+      } else {
+        "安装后请重新打开终端；若需要在 shell 中自动启用 fnm，可将 fnm env 相关初始化写入 shell 配置文件（按 fnm 官方文档）。".to_string()
+      }
+    }
+    "nvm" => {
+      if cfg!(windows) {
+        "安装后请重启 FoPanel；若未识别：\n- 设置 NVM_HOME 指向 nvm 安装目录（目录内应有 nvm.exe）\n- 设置 NVM_SYMLINK 指向 nodejs 软链目录（常见：C:\\Program Files\\nodejs）\n- 确保 nvm.exe 所在目录在 PATH 中".to_string()
+      } else {
+        "安装后请重新打开终端；macOS/Linux 需要在 shell 配置中加载 nvm（例如 ~/.zshrc）并确保 NVM_DIR 正确。".to_string()
+      }
+    }
+    "pyenv" => {
+      if cfg!(windows) {
+        "Windows 建议使用 pyenv-win 或直接安装 Python。".to_string()
+      } else {
+        "安装后请重新打开终端；并把 pyenv init 输出加入你的 shell 配置文件（按 pyenv 官方文档），确保 pyenv/shims 在 PATH 前面。".to_string()
+      }
+    }
+    "rustup" => {
+      if cfg!(windows) {
+        "安装后请重启 FoPanel；并确认 rustup.exe 在 PATH 中。".to_string()
+      } else {
+        "安装后请重新打开终端；并确保 ~/.cargo/bin 在 PATH 中（rustup 安装器一般会自动写入）。".to_string()
+      }
+    }
+    "goenv" => {
+      if cfg!(windows) {
+        "Windows 暂不建议 goenv，可优先使用 winget 安装 Go。".to_string()
+      } else {
+        "安装后请重新打开终端；并把 goenv init 输出加入 shell 配置文件，确保 goenv/shims 在 PATH 前面。".to_string()
+      }
+    }
+    "phpenv" => {
+      if cfg!(windows) {
+        "Windows 暂不建议 phpenv，可优先使用 winget 安装 PHP。".to_string()
+      } else {
+        "安装后请重新打开终端；并执行 phpenv init（按官方文档），确保 $HOME/.phpenv/shims 在 PATH 前面。".to_string()
+      }
+    }
+    "sdkman" => {
+      if cfg!(windows) {
+        "Windows 建议使用 winget 安装 Java；SDKMAN 更适合 macOS/Linux（或在 WSL 中使用）。".to_string()
+      } else {
+        "安装后请重新打开终端；并执行：source \"$HOME/.sdkman/bin/sdkman-init.sh\"。如需长期生效，把 source 行写入 ~/.zshrc 或 ~/.bashrc。".to_string()
+      }
+    }
+    _ => "未知安装器。".to_string(),
   }
 }
 
