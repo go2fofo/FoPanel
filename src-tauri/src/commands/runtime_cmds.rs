@@ -531,9 +531,21 @@ fn is_using_fopanel(shims: &Path, cmd_path: &str) -> bool {
 }
 
 fn classify_system_source(path: &str) -> String {
-  let s = path.to_string();
+  let s = path.replace('\\', "/");
+  let s = s.to_lowercase();
   if s.contains("/.nvm/versions/node/") {
     return "nvm".to_string();
+  }
+  if cfg!(windows) {
+    if let Ok(link) = env::var("NVM_SYMLINK") {
+      let link = link.replace('\\', "/").to_lowercase();
+      if !link.is_empty() && s.starts_with(&link) {
+        return "nvm".to_string();
+      }
+    }
+    if s.contains("/nvm/") {
+      return "nvm".to_string();
+    }
   }
   if s.contains("/.fnm/") || s.contains("/fnm/") {
     return "fnm".to_string();
@@ -1666,25 +1678,57 @@ fn get_node_detail(exec: &Path) -> Result<(Vec<RuntimePackage>, HashMap<String, 
   let bin = exec
     .parent()
     .ok_or_else(|| "node 路径无效".to_string())?;
-  let npm = bin.join("npm");
+  let npm = if cfg!(windows) {
+    let c = bin.join("npm.cmd");
+    if c.exists() {
+      c
+    } else {
+      bin.join("npm")
+    }
+  } else {
+    bin.join("npm")
+  };
   if !npm.exists() {
     return Ok((vec![], info));
   }
 
-  let npm_ver = Command::new(&npm)
-    .args(["-v"])
-    .output()
-    .ok()
-    .map(|o| merge_output(&o).0.trim().to_string())
-    .unwrap_or_default();
+  let npm_ver = if cfg!(windows) {
+    Command::new("cmd")
+      .args(["/C", &npm.to_string_lossy(), "-v"])
+      .output()
+      .ok()
+      .map(|o| merge_output(&o).0.trim().to_string())
+      .unwrap_or_default()
+  } else {
+    Command::new(&npm)
+      .args(["-v"])
+      .output()
+      .ok()
+      .map(|o| merge_output(&o).0.trim().to_string())
+      .unwrap_or_default()
+  };
   if !npm_ver.is_empty() {
     info.insert("npm".to_string(), npm_ver);
   }
 
-  let output = Command::new(&npm)
-    .args(["ls", "-g", "--depth=0", "--json"])
-    .output()
-    .map_err(|e| e.to_string())?;
+  let output = if cfg!(windows) {
+    Command::new("cmd")
+      .args([
+        "/C",
+        &npm.to_string_lossy(),
+        "ls",
+        "-g",
+        "--depth=0",
+        "--json",
+      ])
+      .output()
+      .map_err(|e| e.to_string())?
+  } else {
+    Command::new(&npm)
+      .args(["ls", "-g", "--depth=0", "--json"])
+      .output()
+      .map_err(|e| e.to_string())?
+  };
   let (text, _) = merge_output(&output);
   let text = text.trim();
   if text.is_empty() {
@@ -2114,7 +2158,21 @@ fn is_executable(path: &Path) -> bool {
   }
   #[cfg(windows)]
   {
-    return true;
+    let ext = path
+      .extension()
+      .and_then(|x| x.to_str())
+      .unwrap_or("")
+      .to_ascii_lowercase();
+    if ext.is_empty() {
+      return false;
+    }
+    let exts = env::var_os("PATHEXT")
+      .map(|x| x.to_string_lossy().to_string())
+      .unwrap_or_else(|| ".EXE;.COM".to_string());
+    return exts
+      .split(';')
+      .map(|x| x.trim().trim_start_matches('.').to_ascii_lowercase())
+      .any(|x| x == ext);
   }
   #[allow(unreachable_code)]
   false
@@ -2126,7 +2184,7 @@ fn find_in_path(program: &str) -> Option<PathBuf> {
   {
     let exts = env::var_os("PATHEXT")
       .map(|x| x.to_string_lossy().to_string())
-      .unwrap_or_else(|| ".EXE;.CMD;.BAT;.COM".to_string());
+      .unwrap_or_else(|| ".EXE;.COM".to_string());
     let exts = exts
       .split(';')
       .map(|x| x.trim().to_string())
@@ -2134,9 +2192,6 @@ fn find_in_path(program: &str) -> Option<PathBuf> {
       .collect::<Vec<_>>();
     for dir in env::split_paths(&path) {
       let raw = dir.join(program);
-      if is_executable(&raw) {
-        return Some(raw);
-      }
       for ext in &exts {
         let candidate = PathBuf::from(format!("{}{}", raw.to_string_lossy(), ext));
         if is_executable(&candidate) {
@@ -2192,6 +2247,12 @@ fn nvm_exe_path(overrides: &HashMap<String, String>) -> Option<PathBuf> {
       return Some(p);
     }
   }
+  if let Some(appdata) = env::var_os("APPDATA") {
+    let p = PathBuf::from(appdata).join("nvm").join("nvm.exe");
+    if p.exists() {
+      return Some(p);
+    }
+  }
   if let Some(local) = env::var_os("LOCALAPPDATA") {
     let p = PathBuf::from(local).join("nvm").join("nvm.exe");
     if p.exists() {
@@ -2199,6 +2260,10 @@ fn nvm_exe_path(overrides: &HashMap<String, String>) -> Option<PathBuf> {
     }
   }
   let p = PathBuf::from(r"C:\Program Files\nvm\nvm.exe");
+  if p.exists() {
+    return Some(p);
+  }
+  let p = PathBuf::from(r"C:\Program Files (x86)\nvm\nvm.exe");
   if p.exists() {
     return Some(p);
   }

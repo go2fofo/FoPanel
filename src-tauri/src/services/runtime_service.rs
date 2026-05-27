@@ -278,13 +278,31 @@ fn scan_node() -> Vec<RuntimeVersion> {
     .and_then(|p| read_node_version(p));
 
   if let (Some(path), Some(version)) = (active_node.as_ref(), active_version.as_ref()) {
+    #[cfg(windows)]
+    let (path, source) = {
+      let s = windows_node_source(path);
+      if s.as_deref() == Some("nvm") {
+        let real = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        (real, "nvm".to_string())
+      } else {
+        (path.to_path_buf(), classify_exec_source(path))
+      }
+    };
+    #[cfg(not(windows))]
+    let (path, source) = (path.to_path_buf(), classify_exec_source(path));
+
     out.push(RuntimeVersion {
       language: "node".to_string(),
       version: version.clone(),
       path: path.to_string_lossy().to_string(),
       active: true,
-      source: classify_exec_source(path),
+      source,
     });
+  }
+
+  #[cfg(windows)]
+  {
+    out.extend(scan_node_nvm_windows(&active_node));
   }
 
   if find_in_path("fnm").is_some() {
@@ -1070,7 +1088,7 @@ fn find_in_path(program: &str) -> Option<PathBuf> {
   {
     let exts = env::var_os("PATHEXT")
       .map(|x| x.to_string_lossy().to_string())
-      .unwrap_or_else(|| ".EXE;.CMD;.BAT;.COM".to_string());
+      .unwrap_or_else(|| ".EXE;.COM".to_string());
     let exts = exts
       .split(';')
       .map(|x| x.trim().to_string())
@@ -1078,9 +1096,6 @@ fn find_in_path(program: &str) -> Option<PathBuf> {
       .collect::<Vec<_>>();
     for dir in env::split_paths(&path) {
       let raw = dir.join(program);
-      if is_executable(&raw) {
-        return Some(raw);
-      }
       for ext in &exts {
         let candidate = PathBuf::from(format!("{}{}", raw.to_string_lossy(), ext.to_lowercase()));
         if is_executable(&candidate) {
@@ -1119,7 +1134,21 @@ fn is_executable(path: &Path) -> bool {
   }
   #[cfg(windows)]
   {
-    return true;
+    let ext = path
+      .extension()
+      .and_then(|x| x.to_str())
+      .unwrap_or("")
+      .to_ascii_lowercase();
+    if ext.is_empty() {
+      return false;
+    }
+    let exts = env::var_os("PATHEXT")
+      .map(|x| x.to_string_lossy().to_string())
+      .unwrap_or_else(|| ".EXE;.COM".to_string());
+    return exts
+      .split(';')
+      .map(|x| x.trim().trim_start_matches('.').to_ascii_lowercase())
+      .any(|x| x == ext);
   }
   #[allow(unreachable_code)]
   false
@@ -1143,6 +1172,109 @@ fn nvm_dir() -> Option<PathBuf> {
   } else {
     None
   }
+}
+
+#[cfg(windows)]
+fn nvm_windows_home() -> Option<PathBuf> {
+  if let Some(dir) = env::var_os("NVM_HOME") {
+    let p = PathBuf::from(dir);
+    if p.exists() {
+      return Some(p);
+    }
+  }
+  if let Some(appdata) = env::var_os("APPDATA") {
+    let p = PathBuf::from(appdata).join("nvm");
+    if p.exists() {
+      return Some(p);
+    }
+  }
+  if let Some(local) = env::var_os("LOCALAPPDATA") {
+    let p = PathBuf::from(local).join("nvm");
+    if p.exists() {
+      return Some(p);
+    }
+  }
+  None
+}
+
+#[cfg(windows)]
+fn nvm_windows_symlink() -> Option<PathBuf> {
+  if let Some(dir) = env::var_os("NVM_SYMLINK") {
+    let p = PathBuf::from(dir);
+    if p.exists() {
+      return Some(p);
+    }
+  }
+  let p = PathBuf::from(r"C:\Program Files\nodejs");
+  if p.exists() {
+    return Some(p);
+  }
+  let p = PathBuf::from(r"C:\Program Files (x86)\nodejs");
+  if p.exists() {
+    return Some(p);
+  }
+  None
+}
+
+#[cfg(windows)]
+fn windows_node_source(exec: &Path) -> Option<String> {
+  let Some(link) = nvm_windows_symlink() else {
+    return None;
+  };
+  if exec.starts_with(&link) {
+    return Some("nvm".to_string());
+  }
+  let c = fs::canonicalize(exec).ok()?;
+  if c.starts_with(&link) {
+    return Some("nvm".to_string());
+  }
+  None
+}
+
+#[cfg(windows)]
+fn scan_node_nvm_windows(active_node: &Option<PathBuf>) -> Vec<RuntimeVersion> {
+  let mut out = Vec::<RuntimeVersion>::new();
+  let Some(home) = nvm_windows_home() else {
+    return out;
+  };
+  let Ok(entries) = fs::read_dir(&home) else {
+    return out;
+  };
+  for entry in entries.flatten() {
+    let dir = entry.path();
+    if !dir.is_dir() {
+      continue;
+    }
+    let Some(name) = dir.file_name().and_then(|n| n.to_str()) else {
+      continue;
+    };
+    if !name.starts_with('v') {
+      continue;
+    }
+    let exec = dir.join("node.exe");
+    if !exec.exists() {
+      continue;
+    }
+    let Some(version) = read_node_version(&exec) else {
+      continue;
+    };
+    let mut active = false;
+    if let Some(a) = active_node.as_ref() {
+      if let (Ok(ac), Ok(ec)) = (fs::canonicalize(a), fs::canonicalize(&exec)) {
+        active = ac == ec;
+      } else {
+        active = a == &exec;
+      }
+    }
+    out.push(RuntimeVersion {
+      language: "node".to_string(),
+      version,
+      path: exec.to_string_lossy().to_string(),
+      active,
+      source: "nvm".to_string(),
+    });
+  }
+  out
 }
 
 fn pick_python_exec_in_dir(dir: &Path) -> Option<PathBuf> {
