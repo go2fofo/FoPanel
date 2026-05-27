@@ -32,6 +32,7 @@ pub fn scan_runtimes(app: AppHandle) -> Result<Vec<RuntimeVersion>, String> {
   let mut sys = Vec::<SystemRuntime>::new();
   sys.extend(system_detect_node(&shims)?);
   sys.extend(system_detect_python(&shims)?);
+  sys.extend(system_detect_java(&shims)?);
   sys.extend(system_detect_simple(&shims, "bun", &["--version"])?);
   sys.extend(system_detect_deno(&shims)?);
   sys.extend(system_detect_simple(&shims, "go", &["version"])?);
@@ -83,6 +84,7 @@ pub fn get_system_runtimes(app: AppHandle) -> Result<Vec<SystemRuntime>, String>
   let mut out = Vec::<SystemRuntime>::new();
   out.extend(system_detect_node(&shims)?);
   out.extend(system_detect_python(&shims)?);
+  out.extend(system_detect_java(&shims)?);
   out.extend(system_detect_simple(&shims, "bun", &["--version"])?);
   out.extend(system_detect_deno(&shims)?);
   out.extend(system_detect_simple(&shims, "go", &["version"])?);
@@ -167,6 +169,95 @@ pub fn list_installers(language: String) -> Result<Vec<InstallerOption>, String>
         });
       }
     }
+    "go" => {
+      if has_command("goenv") {
+        out.push(InstallerOption {
+          id: "goenv".to_string(),
+          label: "goenv".to_string(),
+          description: "通过 goenv 安装与管理 Go 版本。".to_string(),
+        });
+      }
+      if cfg!(windows) {
+        if has_command("winget") {
+          out.push(InstallerOption {
+            id: "winget".to_string(),
+            label: "winget".to_string(),
+            description: "通过 winget 安装与管理该语言版本。".to_string(),
+          });
+        }
+      } else if has_command("brew") {
+        out.push(InstallerOption {
+          id: "homebrew".to_string(),
+          label: "Homebrew".to_string(),
+          description: "通过 Homebrew 安装与管理该语言版本。".to_string(),
+        });
+      }
+    }
+    "php" => {
+      if has_command("phpenv") {
+        out.push(InstallerOption {
+          id: "phpenv".to_string(),
+          label: "phpenv".to_string(),
+          description: "通过 phpenv 安装与管理 PHP 版本。".to_string(),
+        });
+      }
+      if cfg!(windows) {
+        if has_command("winget") {
+          out.push(InstallerOption {
+            id: "winget".to_string(),
+            label: "winget".to_string(),
+            description: "通过 winget 安装与管理该语言版本。".to_string(),
+          });
+        }
+      } else if has_command("brew") {
+        out.push(InstallerOption {
+          id: "homebrew".to_string(),
+          label: "Homebrew".to_string(),
+          description: "通过 Homebrew 安装与管理该语言版本。".to_string(),
+        });
+      }
+    }
+    "java" => {
+      if !cfg!(windows) && sdkman_is_available() {
+        out.push(InstallerOption {
+          id: "sdkman".to_string(),
+          label: "SDKMAN".to_string(),
+          description: "通过 SDKMAN 安装与管理 Java（适用于 macOS/Linux）。".to_string(),
+        });
+      }
+      if cfg!(windows) {
+        if has_command("winget") {
+          out.push(InstallerOption {
+            id: "winget".to_string(),
+            label: "winget".to_string(),
+            description: "通过 winget 安装与管理该语言版本。".to_string(),
+          });
+        }
+      } else if has_command("brew") {
+        out.push(InstallerOption {
+          id: "homebrew".to_string(),
+          label: "Homebrew".to_string(),
+          description: "通过 Homebrew 安装与管理该语言版本。".to_string(),
+        });
+      }
+    }
+    "bun" | "deno" => {
+      if cfg!(windows) {
+        if has_command("winget") {
+          out.push(InstallerOption {
+            id: "winget".to_string(),
+            label: "winget".to_string(),
+            description: "通过 winget 安装与管理该语言版本。".to_string(),
+          });
+        }
+      } else if has_command("brew") {
+        out.push(InstallerOption {
+          id: "homebrew".to_string(),
+          label: "Homebrew".to_string(),
+          description: "通过 Homebrew 安装与管理该语言版本。".to_string(),
+        });
+      }
+    }
     _ => {}
   }
 
@@ -180,6 +271,22 @@ pub fn install_runtime(language: String, installer: String, version: String) -> 
     ("node", "nvm") => run_install_nvm(&version)?,
     ("python", "pyenv") => run_install_pyenv(&version)?,
     ("rust", "rustup") => run_install_rustup(&version)?,
+    ("bun", "homebrew") => run_install_homebrew("oven-sh/bun/bun", &version)?,
+    ("deno", "homebrew") => run_install_homebrew("deno", &version)?,
+    ("go", "homebrew") => run_install_homebrew("go", &version)?,
+    ("go", "goenv") => run_install_goenv(&version)?,
+    ("php", "phpenv") => run_install_phpenv(&version)?,
+    ("php", "homebrew") => run_install_homebrew(&homebrew_php_formula(&version), &version)?,
+    ("java", "homebrew") => run_install_homebrew(&homebrew_java_formula(&version), &version)?,
+    ("java", "sdkman") => run_install_sdkman_java(&version)?,
+    ("bun", "winget") => run_install_winget("Oven-sh.Bun", &version)?,
+    ("deno", "winget") => run_install_winget("DenoLand.Deno", &version)?,
+    ("go", "winget") => run_install_winget("GoLang.Go", &version)?,
+    ("php", "winget") => run_install_winget(&winget_php_id(&version), &version)?,
+    ("java", "winget") => {
+      let major = java_major_from_version(&version).unwrap_or(21);
+      run_install_winget(&winget_java_id(major), "latest")?
+    }
     _ => return Err("暂不支持该语言/安装器组合".to_string()),
   };
 
@@ -238,6 +345,16 @@ pub fn get_installer_status() -> Result<Vec<InstallerStatus>, String> {
   let winget = has_command("winget");
 
   out.push(InstallerStatus {
+    id: "homebrew".to_string(),
+    installed: brew,
+    hint: installer_bootstrap_hint("homebrew", brew, winget),
+  });
+  out.push(InstallerStatus {
+    id: "winget".to_string(),
+    installed: winget,
+    hint: installer_bootstrap_hint("winget", brew, winget),
+  });
+  out.push(InstallerStatus {
     id: "fnm".to_string(),
     installed: has_command("fnm"),
     hint: installer_bootstrap_hint("fnm", brew, winget),
@@ -256,6 +373,21 @@ pub fn get_installer_status() -> Result<Vec<InstallerStatus>, String> {
     id: "rustup".to_string(),
     installed: has_command("rustup"),
     hint: installer_bootstrap_hint("rustup", brew, winget),
+  });
+  out.push(InstallerStatus {
+    id: "goenv".to_string(),
+    installed: has_command("goenv"),
+    hint: installer_bootstrap_hint("goenv", brew, winget),
+  });
+  out.push(InstallerStatus {
+    id: "phpenv".to_string(),
+    installed: has_command("phpenv"),
+    hint: installer_bootstrap_hint("phpenv", brew, winget),
+  });
+  out.push(InstallerStatus {
+    id: "sdkman".to_string(),
+    installed: !cfg!(windows) && sdkman_is_available(),
+    hint: installer_bootstrap_hint("sdkman", brew, winget),
   });
 
   Ok(out)
@@ -280,6 +412,14 @@ pub fn uninstall_runtime(app: AppHandle, runtime: ActivateRuntimeInput) -> Resul
     ("node", "nvm") => run_uninstall_nvm(&runtime.version)?,
     ("python", "pyenv") => run_uninstall_pyenv(&runtime.version)?,
     ("rust", "rustup") => run_uninstall_rustup(&runtime.version)?,
+    ("go", "goenv") => run_uninstall_goenv(&runtime.version)?,
+    ("php", "phpenv") => run_uninstall_phpenv(&runtime.version)?,
+    ("java", "homebrew") => run_uninstall_homebrew(&homebrew_java_formula(&runtime.version))?,
+    ("java", "sdkman") => run_uninstall_sdkman_java(&runtime.version)?,
+    ("java", "winget") => {
+      let major = java_major_from_version(&runtime.version).unwrap_or(21);
+      run_uninstall_winget(&winget_java_id(major))?
+    }
     _ => return Err("该版本来源不支持卸载，请在系统中使用原安装方式处理".to_string()),
   };
 
@@ -367,6 +507,15 @@ fn classify_system_source(path: &str) -> String {
   }
   if s.contains("/.asdf/") {
     return "asdf".to_string();
+  }
+  if s.contains("/.goenv/") {
+    return "goenv".to_string();
+  }
+  if s.contains("/.phpenv/") {
+    return "phpenv".to_string();
+  }
+  if s.contains("/.sdkman/") {
+    return "sdkman".to_string();
   }
   if s.contains("/.pyenv/versions/") {
     return "pyenv".to_string();
@@ -599,6 +748,60 @@ fn system_detect_python(shims: &Path) -> Result<Vec<SystemRuntime>, String> {
   }])
 }
 
+fn system_detect_java(shims: &Path) -> Result<Vec<SystemRuntime>, String> {
+  #[cfg(unix)]
+  let script =
+    "p=$(type -P java 2>/dev/null); if [ -z \"$p\" ]; then exit 0; fi; echo \"__FOPANEL_CMD__=$p\"; v=$(java -version 2>&1 | head -n 1); echo \"__FOPANEL_VER__=$v\"";
+  #[cfg(windows)]
+  let script =
+    "$p=(Get-Command java -ErrorAction SilentlyContinue).Source; if(!$p){exit}; Write-Output \"__FOPANEL_CMD__=$p\"; $v=(java -version 2>&1 | Select-Object -First 1); Write-Output \"__FOPANEL_VER__=$v\"";
+
+  let text = run_login_shell(script)?;
+  let mut cmd_path = String::new();
+  let mut version = String::new();
+  for line in text.lines().map(|l| l.trim()).filter(|l| !l.is_empty()) {
+    if let Some(rest) = line.strip_prefix("__FOPANEL_CMD__=") {
+      cmd_path = rest.trim().to_string();
+      continue;
+    }
+    if let Some(rest) = line.strip_prefix("__FOPANEL_VER__=") {
+      let v = rest.trim();
+      if v.contains("Unable to locate a Java Runtime")
+        || v.contains("No Java runtime present")
+        || v.contains("Unable to locate Java Runtime")
+      {
+        return Ok(vec![]);
+      }
+      version = extract_semver_like(v).unwrap_or_else(|| v.to_string());
+      continue;
+    }
+  }
+  if cmd_path.is_empty() {
+    return Ok(vec![]);
+  }
+
+  let mut source = classify_system_source(&cmd_path);
+  if cmd_path.contains("/.sdkman/candidates/java/") {
+    source = "sdkman".to_string();
+  }
+  if cfg!(windows) && has_command("winget") {
+    if let Some(major) = java_major_from_version(&version) {
+      let id = winget_java_id(major);
+      if winget_id_installed(&id) {
+        source = "winget".to_string();
+      }
+    }
+  }
+
+  Ok(vec![SystemRuntime {
+    language: "java".to_string(),
+    version,
+    path: cmd_path.to_string(),
+    source,
+    using_fopanel: is_using_fopanel(shims, &cmd_path),
+  }])
+}
+
 fn system_detect_node_activated(shims: &Path) -> Result<Vec<SystemRuntime>, String> {
   #[cfg(unix)]
   let script =
@@ -801,6 +1004,7 @@ pub fn get_runtime_detail(
     "rust" => get_rust_detail(&resolved_exec)?,
     "go" => get_go_detail(&resolved_exec)?,
     "php" => get_php_detail(&resolved_exec)?,
+    "java" => get_java_detail(&resolved_exec)?,
     _ => (vec![], HashMap::new()),
   };
   info.extend(extra);
@@ -825,6 +1029,11 @@ fn runtime_manage_hints(rt: &RuntimeVersion) -> (String, String) {
     ("python", "framework") => "单版本：请用系统/官方安装器升级（或通过包管理器升级）".to_string(),
     ("deno", "homebrew") => "单版本：brew upgrade deno".to_string(),
     ("bun", "homebrew") => "单版本：brew upgrade bun".to_string(),
+    ("go", "goenv") => "多版本：goenv install -s <version>（安装后再切换/设置全局）".to_string(),
+    ("php", "phpenv") => "多版本：phpenv install <version>（安装后再切换/设置全局）".to_string(),
+    ("java", "homebrew") => "单版本：brew upgrade openjdk（或 openjdk@<主版本>）".to_string(),
+    ("java", "winget") => "单版本：winget upgrade --id EclipseAdoptium.Temurin.<主版本>.JDK -e".to_string(),
+    ("java", "sdkman") => "多版本：sdk install java <candidate>（例如 21.0.2-tem）".to_string(),
     ("deno", _) => "单版本：deno upgrade（若该构建启用了 upgrade 功能）".to_string(),
     ("bun", _) => "单版本：bun upgrade".to_string(),
     _ => String::new(),
@@ -835,10 +1044,15 @@ fn runtime_manage_hints(rt: &RuntimeVersion) -> (String, String) {
     ("node", "nvm") => "卸载：nvm uninstall v<version>；也可在 FoPanel 里点“卸载”".to_string(),
     ("python", "pyenv") => "卸载：pyenv uninstall <version>（可能需要 pyenv-uninstall 插件）".to_string(),
     ("rust", "rustup") => "卸载：rustup toolchain uninstall <version>；也可在 FoPanel 里点“卸载”".to_string(),
+    ("go", "goenv") => "卸载：goenv uninstall <version>（可能需要 goenv-uninstall 插件）；也可在 FoPanel 里点“卸载”".to_string(),
+    ("php", "phpenv") => "卸载：phpenv uninstall <version>（可能需要 phpenv-uninstall 插件）；也可在 FoPanel 里点“卸载”".to_string(),
     ("deno", "homebrew") => "卸载：brew uninstall deno；FoPanel 建议只做隐藏".to_string(),
     ("bun", "homebrew") => "卸载：brew uninstall bun；FoPanel 建议只做隐藏".to_string(),
     ("node", "homebrew") => "卸载：brew uninstall node（或 node@<主版本>）；FoPanel 建议只做隐藏".to_string(),
     ("python", "homebrew") => "卸载：brew uninstall python（或 python@<主版本>）；FoPanel 建议只做隐藏".to_string(),
+    ("java", "homebrew") => "卸载：brew uninstall openjdk（或 openjdk@<主版本>）；也可在 FoPanel 里点“卸载”".to_string(),
+    ("java", "winget") => "卸载：winget uninstall --id EclipseAdoptium.Temurin.<主版本>.JDK -e；也可在 FoPanel 里点“卸载”".to_string(),
+    ("java", "sdkman") => "卸载：sdk uninstall java <candidate>；也可在 FoPanel 里点“卸载”".to_string(),
     ("python", "framework") => "FoPanel 仅支持隐藏；卸载请通过系统/安装器处理".to_string(),
     (_, "standalone") => "FoPanel 仅支持隐藏；卸载请使用原安装方式处理".to_string(),
     (_, "path") => "FoPanel 仅支持隐藏；卸载请使用原安装方式处理".to_string(),
@@ -908,27 +1122,126 @@ fn profiles_file_path(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 fn default_profiles() -> Vec<RuntimeProfile> {
-  vec![RuntimeProfile {
-    id: "default".to_string(),
-    name: "默认开发环境".to_string(),
-    items: vec![
-      RuntimeProfileItem {
-        language: "node".to_string(),
-        installer: "fnm".to_string(),
-        version: "22.0.0".to_string(),
-      },
-      RuntimeProfileItem {
-        language: "python".to_string(),
-        installer: "pyenv".to_string(),
-        version: "3.12.13".to_string(),
-      },
-      RuntimeProfileItem {
-        language: "rust".to_string(),
-        installer: "rustup".to_string(),
-        version: "stable".to_string(),
-      },
-    ],
-  }]
+  vec![
+    RuntimeProfile {
+      id: "default-mac".to_string(),
+      name: "默认开发环境（macOS）".to_string(),
+      items: vec![
+        RuntimeProfileItem {
+          language: "node".to_string(),
+          installer: "fnm".to_string(),
+          version: "22.0.0".to_string(),
+        },
+        RuntimeProfileItem {
+          language: "python".to_string(),
+          installer: "pyenv".to_string(),
+          version: "3.12.13".to_string(),
+        },
+        RuntimeProfileItem {
+          language: "rust".to_string(),
+          installer: "rustup".to_string(),
+          version: "stable".to_string(),
+        },
+        RuntimeProfileItem {
+          language: "bun".to_string(),
+          installer: "homebrew".to_string(),
+          version: "latest".to_string(),
+        },
+        RuntimeProfileItem {
+          language: "deno".to_string(),
+          installer: "homebrew".to_string(),
+          version: "latest".to_string(),
+        },
+        RuntimeProfileItem {
+          language: "go".to_string(),
+          installer: "homebrew".to_string(),
+          version: "latest".to_string(),
+        },
+        RuntimeProfileItem {
+          language: "php".to_string(),
+          installer: "homebrew".to_string(),
+          version: "8.4".to_string(),
+        },
+        RuntimeProfileItem {
+          language: "java".to_string(),
+          installer: "homebrew".to_string(),
+          version: "21".to_string(),
+        },
+      ],
+    },
+    RuntimeProfile {
+      id: "default-mac-managers".to_string(),
+      name: "默认开发环境（macOS·版本管理器示例）".to_string(),
+      items: vec![
+        RuntimeProfileItem {
+          language: "node".to_string(),
+          installer: "fnm".to_string(),
+          version: "22.0.0".to_string(),
+        },
+        RuntimeProfileItem {
+          language: "python".to_string(),
+          installer: "pyenv".to_string(),
+          version: "3.12.13".to_string(),
+        },
+        RuntimeProfileItem {
+          language: "go".to_string(),
+          installer: "goenv".to_string(),
+          version: "1.22.0".to_string(),
+        },
+        RuntimeProfileItem {
+          language: "php".to_string(),
+          installer: "phpenv".to_string(),
+          version: "8.3.0".to_string(),
+        },
+        RuntimeProfileItem {
+          language: "java".to_string(),
+          installer: "sdkman".to_string(),
+          version: "21.0.2-tem".to_string(),
+        },
+      ],
+    },
+    RuntimeProfile {
+      id: "default-win".to_string(),
+      name: "默认开发环境（Windows）".to_string(),
+      items: vec![
+        RuntimeProfileItem {
+          language: "node".to_string(),
+          installer: "nvm".to_string(),
+          version: "22.0.0".to_string(),
+        },
+        RuntimeProfileItem {
+          language: "rust".to_string(),
+          installer: "rustup".to_string(),
+          version: "stable".to_string(),
+        },
+        RuntimeProfileItem {
+          language: "bun".to_string(),
+          installer: "winget".to_string(),
+          version: "latest".to_string(),
+        },
+        RuntimeProfileItem {
+          language: "deno".to_string(),
+          installer: "winget".to_string(),
+          version: "latest".to_string(),
+        },
+        RuntimeProfileItem {
+          language: "go".to_string(),
+          installer: "winget".to_string(),
+          version: "latest".to_string(),
+        },
+        RuntimeProfileItem {
+          language: "php".to_string(),
+          installer: "winget".to_string(),
+          version: "8.4".to_string(),
+        },
+        RuntimeProfileItem {
+          language: "java".to_string(),
+          installer: "winget".to_string(),
+          version: "21".to_string(),
+        },
+      ],
+    },
+  ]
 }
 
 fn load_profiles(app: &AppHandle) -> Result<Vec<RuntimeProfile>, String> {
@@ -1028,6 +1341,24 @@ fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
 
 fn installer_bootstrap_hint(installer: &str, brew: bool, winget: bool) -> String {
   match installer {
+    "homebrew" => {
+      if cfg!(windows) {
+        return "Homebrew 仅适用于 macOS/Linux".to_string();
+      }
+      if brew {
+        return "brew update".to_string();
+      }
+      "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"".to_string()
+    }
+    "winget" => {
+      if cfg!(windows) {
+        if winget {
+          return "winget --version".to_string();
+        }
+        return "请安装 Microsoft Store 的 App Installer（包含 winget）".to_string();
+      }
+      "winget 仅适用于 Windows".to_string()
+    }
     "fnm" => {
       if cfg!(windows) {
         if winget {
@@ -1066,6 +1397,30 @@ fn installer_bootstrap_hint(installer: &str, brew: bool, winget: bool) -> String
         return "请先安装 winget 或访问 https://rustup.rs 安装 rustup".to_string();
       }
       "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y".to_string()
+    }
+    "goenv" => {
+      if cfg!(windows) {
+        return "Windows 暂不建议 goenv：可使用 winget 安装 Go（或自行配置多版本方案）".to_string();
+      }
+      if brew {
+        return "brew install goenv".to_string();
+      }
+      "建议安装 Homebrew 后执行：brew install goenv".to_string()
+    }
+    "phpenv" => {
+      if cfg!(windows) {
+        return "Windows 暂不建议 phpenv：可使用 winget 安装 PHP（或自行配置多版本方案）".to_string();
+      }
+      if brew {
+        return "可选：brew install phpenv（如不可用请按官方文档安装）".to_string();
+      }
+      "建议：安装 phpenv 后执行 phpenv init，并确保 $HOME/.phpenv/shims 在 PATH 前面".to_string()
+    }
+    "sdkman" => {
+      if cfg!(windows) {
+        return "Windows 建议使用 winget 安装 Java；SDKMAN 更适合 macOS/Linux（或在 WSL 中使用）".to_string();
+      }
+      "curl -s \"https://get.sdkman.io\" | bash && source \"$HOME/.sdkman/bin/sdkman-init.sh\"".to_string()
     }
     _ => "未知安装器".to_string(),
   }
@@ -1412,6 +1767,39 @@ fn get_php_detail(exec: &Path) -> Result<(Vec<RuntimePackage>, HashMap<String, S
   Ok((packages, info))
 }
 
+fn get_java_detail(exec: &Path) -> Result<(Vec<RuntimePackage>, HashMap<String, String>), String> {
+  let mut info = HashMap::<String, String>::new();
+  let output = Command::new(exec)
+    .args(["-version"])
+    .output()
+    .map_err(|e| e.to_string())?;
+  let (text, _) = merge_output(&output);
+  let java_ver = text.trim().to_string();
+  if !java_ver.is_empty() {
+    info.insert("java".to_string(), java_ver);
+  }
+
+  if let Some(bin) = exec.parent() {
+    if let Some(home) = bin.parent() {
+      info.insert("JAVA_HOME(推断)".to_string(), home.to_string_lossy().to_string());
+    }
+    let javac = bin.join(if cfg!(windows) { "javac.exe" } else { "javac" });
+    if javac.exists() {
+      let out = Command::new(&javac)
+        .args(["-version"])
+        .output()
+        .ok()
+        .map(|o| merge_output(&o).0.trim().to_string())
+        .unwrap_or_default();
+      if !out.is_empty() {
+        info.insert("javac".to_string(), out);
+      }
+    }
+  }
+
+  Ok((vec![], info))
+}
+
 fn link_exec(shims: &Path, name: &str, target: &Path) -> Result<(), String> {
   let link = shims.join(name);
   if link.exists() {
@@ -1724,6 +2112,248 @@ fn run_install_pyenv(version: &str) -> Result<String, String> {
 fn run_install_rustup(version: &str) -> Result<String, String> {
   let out = Command::new("rustup")
     .args(["toolchain", "install", version])
+    .output()
+    .map_err(|e| e.to_string())?;
+  Ok(merge_output(&out).0.trim().to_string())
+}
+
+fn run_install_homebrew(formula: &str, _version: &str) -> Result<String, String> {
+  if cfg!(windows) {
+    return Err("当前系统不支持 Homebrew 安装器".to_string());
+  }
+  let out = Command::new("brew")
+    .args(["install", formula])
+    .output()
+    .map_err(|e| e.to_string())?;
+  Ok(merge_output(&out).0.trim().to_string())
+}
+
+fn run_install_winget(id: &str, version: &str) -> Result<String, String> {
+  if !cfg!(windows) {
+    return Err("当前系统不支持 winget 安装器".to_string());
+  }
+  let mut args = vec![
+    "install".to_string(),
+    "--id".to_string(),
+    id.to_string(),
+    "-e".to_string(),
+    "--accept-source-agreements".to_string(),
+    "--accept-package-agreements".to_string(),
+  ];
+  let v = version.trim();
+  if !v.is_empty() && v != "latest" && v != "stable" {
+    args.push("--version".to_string());
+    args.push(v.to_string());
+  }
+  let out = Command::new("winget")
+    .args(args)
+    .output()
+    .map_err(|e| e.to_string())?;
+  Ok(merge_output(&out).0.trim().to_string())
+}
+
+fn run_install_goenv(version: &str) -> Result<String, String> {
+  let out = Command::new("goenv")
+    .args(["install", "-s", version])
+    .output()
+    .map_err(|e| e.to_string())?;
+  Ok(merge_output(&out).0.trim().to_string())
+}
+
+fn run_uninstall_goenv(version: &str) -> Result<String, String> {
+  if !goenv_has_uninstall()? {
+    return Err("当前 goenv 未提供 uninstall 命令，请安装 goenv-uninstall 或手动删除版本目录".to_string());
+  }
+  let out = Command::new("goenv")
+    .args(["uninstall", "-f", version])
+    .output()
+    .map_err(|e| e.to_string())?;
+  Ok(merge_output(&out).0.trim().to_string())
+}
+
+fn goenv_has_uninstall() -> Result<bool, String> {
+  let out = Command::new("goenv")
+    .args(["commands"])
+    .output()
+    .map_err(|e| e.to_string())?;
+  let (text, _) = merge_output(&out);
+  Ok(text.lines().any(|l| l.trim() == "uninstall"))
+}
+
+fn run_install_phpenv(version: &str) -> Result<String, String> {
+  let v = version.trim();
+  if v.is_empty() || v == "latest" || v == "stable" {
+    return Err("phpenv 需要明确版本号（例如 8.4.0）".to_string());
+  }
+  let out = Command::new("phpenv")
+    .args(["install", v])
+    .output()
+    .map_err(|e| e.to_string())?;
+  Ok(merge_output(&out).0.trim().to_string())
+}
+
+fn run_uninstall_phpenv(version: &str) -> Result<String, String> {
+  if !phpenv_has_uninstall()? {
+    return Err("当前 phpenv 未提供 uninstall 命令，请安装 phpenv-uninstall 或手动删除版本目录".to_string());
+  }
+  let out = Command::new("phpenv")
+    .args(["uninstall", "-f", version])
+    .output()
+    .map_err(|e| e.to_string())?;
+  Ok(merge_output(&out).0.trim().to_string())
+}
+
+fn phpenv_has_uninstall() -> Result<bool, String> {
+  let out = Command::new("phpenv")
+    .args(["commands"])
+    .output()
+    .map_err(|e| e.to_string())?;
+  let (text, _) = merge_output(&out);
+  Ok(text.lines().any(|l| l.trim() == "uninstall"))
+}
+
+fn sdkman_is_available() -> bool {
+  if cfg!(windows) {
+    return false;
+  }
+  let script =
+    "export SDKMAN_DIR=\"${SDKMAN_DIR:-$HOME/.sdkman}\"; [ -s \"$SDKMAN_DIR/bin/sdkman-init.sh\" ] || exit 1; source \"$SDKMAN_DIR/bin/sdkman-init.sh\"; type -t sdk 2>/dev/null";
+  let out = Command::new("bash").args(["-lc", script]).output();
+  let Ok(out) = out else {
+    return false;
+  };
+  let (text, _) = merge_output(&out);
+  let t = text.trim();
+  t == "function" || t == "file"
+}
+
+fn run_install_sdkman_java(candidate: &str) -> Result<String, String> {
+  if cfg!(windows) {
+    return Err("Windows 不支持直接使用 SDKMAN（建议使用 winget，或在 WSL 中安装 SDKMAN）".to_string());
+  }
+  let c = candidate.trim();
+  if c.is_empty() || c == "latest" || c == "stable" {
+    return Err("SDKMAN 需要 Java candidate（例如 21.0.2-tem / 17.0.10-zulu）".to_string());
+  }
+  let script = format!(
+    "export SDKMAN_DIR=\"${{SDKMAN_DIR:-$HOME/.sdkman}}\"; export SDKMAN_NON_INTERACTIVE=true; source \"$SDKMAN_DIR/bin/sdkman-init.sh\"; sdk install java {c}",
+    c = shell_escape(c)
+  );
+  let out = Command::new("bash")
+    .args(["-lc", &script])
+    .output()
+    .map_err(|e| e.to_string())?;
+  Ok(merge_output(&out).0.trim().to_string())
+}
+
+fn run_uninstall_sdkman_java(candidate: &str) -> Result<String, String> {
+  if cfg!(windows) {
+    return Err("Windows 不支持直接使用 SDKMAN（建议使用 winget，或在 WSL 中安装 SDKMAN）".to_string());
+  }
+  let c = candidate.trim();
+  if c.is_empty() || c == "latest" || c == "stable" {
+    return Err("SDKMAN 需要 Java candidate（例如 21.0.2-tem / 17.0.10-zulu）".to_string());
+  }
+  let script = format!(
+    "export SDKMAN_DIR=\"${{SDKMAN_DIR:-$HOME/.sdkman}}\"; export SDKMAN_NON_INTERACTIVE=true; source \"$SDKMAN_DIR/bin/sdkman-init.sh\"; sdk uninstall java {c}",
+    c = shell_escape(c)
+  );
+  let out = Command::new("bash")
+    .args(["-lc", &script])
+    .output()
+    .map_err(|e| e.to_string())?;
+  Ok(merge_output(&out).0.trim().to_string())
+}
+
+fn java_major_from_version(version: &str) -> Option<u32> {
+  let v = version.trim();
+  if v.is_empty() || v == "latest" || v == "stable" {
+    return None;
+  }
+  let mut s = v;
+  if let Some(rest) = v.strip_prefix("1.") {
+    s = rest;
+  }
+  let digits: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
+  if digits.is_empty() {
+    None
+  } else {
+    digits.parse::<u32>().ok()
+  }
+}
+
+fn homebrew_java_formula(version: &str) -> String {
+  let v = version.trim();
+  if v.is_empty() || v == "latest" || v == "stable" {
+    return "openjdk".to_string();
+  }
+  let major = java_major_from_version(v).unwrap_or(21);
+  format!("openjdk@{major}")
+}
+
+fn winget_java_id(major: u32) -> String {
+  format!("EclipseAdoptium.Temurin.{major}.JDK")
+}
+
+fn winget_id_installed(id: &str) -> bool {
+  if !cfg!(windows) {
+    return false;
+  }
+  let out = Command::new("winget")
+    .args(["list", "--id", id, "-e"])
+    .output();
+  let Ok(out) = out else {
+    return false;
+  };
+  let (text, _) = merge_output(&out);
+  text.lines().any(|l| l.contains(id))
+}
+
+fn homebrew_php_formula(version: &str) -> String {
+  let v = version.trim();
+  let parts: Vec<&str> = v.split('.').collect();
+  if parts.len() >= 2 {
+    return format!("php@{}.{}", parts[0], parts[1]);
+  }
+  if !v.is_empty() && v.chars().all(|c| c.is_ascii_digit() || c == '.') {
+    return format!("php@{v}");
+  }
+  "php".to_string()
+}
+
+fn winget_php_id(version: &str) -> String {
+  let v = version.trim();
+  let parts: Vec<&str> = v.split('.').collect();
+  if parts.len() >= 2 {
+    return format!("PHP.PHP.{}.{}", parts[0], parts[1]);
+  }
+  "PHP.PHP.8.4".to_string()
+}
+
+fn run_uninstall_homebrew(formula: &str) -> Result<String, String> {
+  if cfg!(windows) {
+    return Err("当前系统不支持 Homebrew 安装器".to_string());
+  }
+  let out = Command::new("brew")
+    .args(["uninstall", "--ignore-dependencies", formula])
+    .output()
+    .map_err(|e| e.to_string())?;
+  Ok(merge_output(&out).0.trim().to_string())
+}
+
+fn run_uninstall_winget(id: &str) -> Result<String, String> {
+  if !cfg!(windows) {
+    return Err("当前系统不支持 winget 安装器".to_string());
+  }
+  let out = Command::new("winget")
+    .args([
+      "uninstall",
+      "--id",
+      id,
+      "-e",
+      "--accept-source-agreements",
+      "--accept-package-agreements",
+    ])
     .output()
     .map_err(|e| e.to_string())?;
   Ok(merge_output(&out).0.trim().to_string())

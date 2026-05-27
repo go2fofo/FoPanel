@@ -25,6 +25,7 @@ pub fn scan_system_runtimes() -> Vec<RuntimeVersion> {
   out.extend(scan_go());
   out.extend(scan_rust());
   out.extend(scan_php());
+  out.extend(scan_java());
 
   let mut seen = HashSet::<(String, String, String, String)>::new();
   out.retain(|r| {
@@ -49,6 +50,15 @@ fn classify_exec_source(exec: &Path) -> String {
   if s.contains("/.asdf/") {
     return "asdf".to_string();
   }
+  if s.contains("/.goenv/") {
+    return "goenv".to_string();
+  }
+  if s.contains("/.phpenv/") {
+    return "phpenv".to_string();
+  }
+  if s.contains("/.sdkman/") {
+    return "sdkman".to_string();
+  }
   if s.contains("/Cellar/") || s.starts_with("/opt/homebrew/") {
     return "homebrew".to_string();
   }
@@ -62,6 +72,24 @@ fn is_pyenv_shim(exec: &Path) -> bool {
   }
   let real = fs::canonicalize(exec).unwrap_or_else(|_| exec.to_path_buf());
   real.to_string_lossy().contains("/.pyenv/shims/")
+}
+
+fn is_goenv_shim(exec: &Path) -> bool {
+  let raw = exec.to_string_lossy();
+  if raw.contains("/.goenv/shims/") {
+    return true;
+  }
+  let real = fs::canonicalize(exec).unwrap_or_else(|_| exec.to_path_buf());
+  real.to_string_lossy().contains("/.goenv/shims/")
+}
+
+fn is_phpenv_shim(exec: &Path) -> bool {
+  let raw = exec.to_string_lossy();
+  if raw.contains("/.phpenv/shims/") {
+    return true;
+  }
+  let real = fs::canonicalize(exec).unwrap_or_else(|_| exec.to_path_buf());
+  real.to_string_lossy().contains("/.phpenv/shims/")
 }
 
 fn scan_bun() -> Vec<RuntimeVersion> {
@@ -589,19 +617,70 @@ fn find_node_bins_in_root(
 
 fn scan_go() -> Vec<RuntimeVersion> {
   let mut out = Vec::<RuntimeVersion>::new();
-  let Some(exec) = find_in_path("go") else {
+  let active_go = find_in_path("go");
+  let mut active_exec = active_go.clone();
+  if find_in_path("goenv").is_some() {
+    if let Some(p) = run_capture("goenv", &["which", "go"]) {
+      let exec = PathBuf::from(p.trim());
+      if exec.exists() {
+        active_exec = Some(exec);
+      }
+    }
+  }
+
+  if let Some(exec) = active_go.as_ref() {
+    if !is_goenv_shim(exec) {
+      if let Some(version) = read_go_version(exec) {
+        out.push(RuntimeVersion {
+          language: "go".to_string(),
+          version,
+          path: exec.to_string_lossy().to_string(),
+          active: active_exec.as_ref() == Some(exec),
+          source: classify_exec_source(exec),
+        });
+      }
+    }
+  }
+
+  out.extend(scan_go_goenv(&active_exec));
+  out
+}
+
+fn scan_go_goenv(active_exec: &Option<PathBuf>) -> Vec<RuntimeVersion> {
+  let mut out = Vec::<RuntimeVersion>::new();
+  let Some(home) = home_dir() else {
     return out;
   };
-  let Some(version) = read_go_version(&exec) else {
+  let root = home.join(".goenv").join("versions");
+  let Ok(entries) = fs::read_dir(&root) else {
     return out;
   };
-  out.push(RuntimeVersion {
-    language: "go".to_string(),
-    version,
-    path: exec.to_string_lossy().to_string(),
-    active: true,
-    source: "path".to_string(),
-  });
+  for entry in entries.flatten() {
+    let dir = entry.path();
+    if !dir.is_dir() {
+      continue;
+    }
+    let Some(name) = dir.file_name().and_then(|n| n.to_str()) else {
+      continue;
+    };
+    if name == "system" {
+      continue;
+    }
+    let exec = dir.join("bin").join(if cfg!(windows) { "go.exe" } else { "go" });
+    if !exec.exists() {
+      continue;
+    }
+    let Some(version) = read_go_version(&exec) else {
+      continue;
+    };
+    out.push(RuntimeVersion {
+      language: "go".to_string(),
+      version,
+      path: exec.to_string_lossy().to_string(),
+      active: active_exec.as_ref().is_some_and(|p| p.starts_with(&dir)),
+      source: "goenv".to_string(),
+    });
+  }
   out
 }
 
@@ -625,20 +704,247 @@ fn scan_rust() -> Vec<RuntimeVersion> {
 
 fn scan_php() -> Vec<RuntimeVersion> {
   let mut out = Vec::<RuntimeVersion>::new();
-  let Some(exec) = find_in_path("php") else {
-    return out;
-  };
-  let Some(version) = read_php_version(&exec) else {
-    return out;
-  };
-  out.push(RuntimeVersion {
-    language: "php".to_string(),
-    version,
-    path: exec.to_string_lossy().to_string(),
-    active: true,
-    source: "path".to_string(),
-  });
+
+  let php = find_in_path("php");
+  let mut active_exec = php.clone();
+  if find_in_path("phpenv").is_some() {
+    if let Some(p) = run_capture("phpenv", &["which", "php"]) {
+      let exec = PathBuf::from(p.trim());
+      if exec.exists() {
+        active_exec = Some(exec);
+      }
+    }
+  }
+
+  if let Some(exec) = php.as_ref() {
+    if !is_phpenv_shim(exec) {
+      if let Some(version) = read_php_version(exec) {
+        out.push(RuntimeVersion {
+          language: "php".to_string(),
+          version,
+          path: exec.to_string_lossy().to_string(),
+          active: active_exec.as_ref() == Some(exec),
+          source: classify_exec_source(exec),
+        });
+      }
+    }
+  }
+
+  out.extend(scan_php_phpenv(&active_exec));
   out
+}
+
+fn scan_php_phpenv(active_exec: &Option<PathBuf>) -> Vec<RuntimeVersion> {
+  let mut out = Vec::<RuntimeVersion>::new();
+  let Some(home) = home_dir() else {
+    return out;
+  };
+  let root = home.join(".phpenv").join("versions");
+  let Ok(entries) = fs::read_dir(&root) else {
+    return out;
+  };
+  for entry in entries.flatten() {
+    let dir = entry.path();
+    if !dir.is_dir() {
+      continue;
+    }
+    let Some(name) = dir.file_name().and_then(|n| n.to_str()) else {
+      continue;
+    };
+    if name == "system" {
+      continue;
+    }
+    let exec = dir.join("bin").join(if cfg!(windows) { "php.exe" } else { "php" });
+    if !exec.exists() {
+      continue;
+    }
+    let Some(version) = read_php_version(&exec) else {
+      continue;
+    };
+    out.push(RuntimeVersion {
+      language: "php".to_string(),
+      version,
+      path: exec.to_string_lossy().to_string(),
+      active: active_exec.as_ref().is_some_and(|p| p.starts_with(&dir)),
+      source: "phpenv".to_string(),
+    });
+  }
+  out
+}
+
+fn scan_java() -> Vec<RuntimeVersion> {
+  let mut out = Vec::<RuntimeVersion>::new();
+
+  let active_java = find_in_path("java");
+  if let Some(exec) = active_java.as_ref() {
+    if let Some(version) = read_java_version(exec) {
+      out.push(RuntimeVersion {
+        language: "java".to_string(),
+        version,
+        path: exec.to_string_lossy().to_string(),
+        active: true,
+        source: classify_exec_source(exec),
+      });
+    }
+  }
+
+  out.extend(scan_java_macos_jvm_dir(&active_java));
+  out.extend(scan_java_homebrew(&active_java));
+  out.extend(scan_java_sdkman(&active_java));
+  out
+}
+
+fn scan_java_sdkman(active_java: &Option<PathBuf>) -> Vec<RuntimeVersion> {
+  let mut out = Vec::<RuntimeVersion>::new();
+  if cfg!(windows) {
+    return out;
+  }
+  let Some(home) = home_dir() else {
+    return out;
+  };
+  let root = home.join(".sdkman").join("candidates").join("java");
+  let Ok(entries) = fs::read_dir(&root) else {
+    return out;
+  };
+  for entry in entries.flatten() {
+    let dir = entry.path();
+    if !dir.is_dir() {
+      continue;
+    }
+    let Some(name) = dir.file_name().and_then(|n| n.to_str()) else {
+      continue;
+    };
+    if name == "current" {
+      continue;
+    }
+    let exec = dir.join("bin").join("java");
+    if !exec.exists() {
+      continue;
+    }
+    let Some(version) = read_java_version(&exec) else {
+      continue;
+    };
+    out.push(RuntimeVersion {
+      language: "java".to_string(),
+      version,
+      path: exec.to_string_lossy().to_string(),
+      active: active_java.as_ref().is_some_and(|p| p.starts_with(&dir)),
+      source: "sdkman".to_string(),
+    });
+  }
+  out
+}
+
+fn scan_java_macos_jvm_dir(active_java: &Option<PathBuf>) -> Vec<RuntimeVersion> {
+  let mut out = Vec::<RuntimeVersion>::new();
+  if !cfg!(target_os = "macos") {
+    return out;
+  }
+  let root = PathBuf::from("/Library/Java/JavaVirtualMachines");
+  let Ok(entries) = fs::read_dir(&root) else {
+    return out;
+  };
+  for entry in entries.flatten() {
+    let dir = entry.path();
+    if !dir.is_dir() {
+      continue;
+    }
+    let exec = dir.join("Contents").join("Home").join("bin").join("java");
+    if !exec.exists() {
+      continue;
+    }
+    let Some(version) = read_java_version(&exec) else {
+      continue;
+    };
+    let name = dir
+      .file_name()
+      .and_then(|n| n.to_str())
+      .unwrap_or_default()
+      .to_string();
+    out.push(RuntimeVersion {
+      language: "java".to_string(),
+      version,
+      path: exec.to_string_lossy().to_string(),
+      active: active_java.as_ref().is_some_and(|p| p.starts_with(&dir)),
+      source: if name.to_lowercase().contains("temurin") || name.to_lowercase().contains("adoptium")
+      {
+        "jvm-temurin".to_string()
+      } else if name.to_lowercase().contains("zulu") {
+        "jvm-zulu".to_string()
+      } else if name.to_lowercase().contains("corretto") {
+        "jvm-corretto".to_string()
+      } else if name.to_lowercase().contains("graalvm") {
+        "jvm-graalvm".to_string()
+      } else {
+        "jvm".to_string()
+      },
+    });
+  }
+  out
+}
+
+fn scan_java_homebrew(active_java: &Option<PathBuf>) -> Vec<RuntimeVersion> {
+  let mut out = Vec::<RuntimeVersion>::new();
+  let roots = ["/opt/homebrew/Cellar", "/usr/local/Cellar"];
+  for root in roots {
+    let root = PathBuf::from(root);
+    if !root.exists() {
+      continue;
+    }
+    let Ok(entries) = fs::read_dir(&root) else {
+      continue;
+    };
+    for entry in entries.flatten() {
+      let pkg = entry.path();
+      let Some(name) = pkg.file_name().and_then(|n| n.to_str()) else {
+        continue;
+      };
+      if !(name == "openjdk" || name.starts_with("openjdk@")) {
+        continue;
+      }
+      let Ok(vers) = fs::read_dir(&pkg) else {
+        continue;
+      };
+      for v in vers.flatten() {
+        let dir = v.path();
+        if !dir.is_dir() {
+          continue;
+        }
+        let Some(exec) = find_java_exec_in_dir(&dir) else {
+          continue;
+        };
+        let Some(version) = read_java_version(&exec) else {
+          continue;
+        };
+        out.push(RuntimeVersion {
+          language: "java".to_string(),
+          version,
+          path: exec.to_string_lossy().to_string(),
+          active: active_java.as_ref().is_some_and(|p| p.starts_with(&dir)),
+          source: "homebrew".to_string(),
+        });
+      }
+    }
+  }
+  out
+}
+
+fn find_java_exec_in_dir(dir: &Path) -> Option<PathBuf> {
+  let c1 = dir.join("bin").join("java");
+  if c1.exists() {
+    return Some(c1);
+  }
+  let c2 = dir
+    .join("libexec")
+    .join("openjdk.jdk")
+    .join("Contents")
+    .join("Home")
+    .join("bin")
+    .join("java");
+  if c2.exists() {
+    return Some(c2);
+  }
+  None
 }
 
 fn read_python_version(exec: &Path) -> Option<String> {
@@ -674,6 +980,18 @@ fn read_bun_version(exec: &Path) -> Option<String> {
   let out = run_capture(exec.to_string_lossy().as_ref(), &["--version"])?;
   let s = out.trim();
   extract_semver_like(s).or_else(|| Some(s.to_string()))
+}
+
+fn read_java_version(exec: &Path) -> Option<String> {
+  let out = run_capture(exec.to_string_lossy().as_ref(), &["-version"])?;
+  if out.contains("Unable to locate a Java Runtime")
+    || out.contains("No Java runtime present")
+    || out.contains("Unable to locate Java Runtime")
+  {
+    return None;
+  }
+  let first = out.lines().next()?.trim();
+  extract_semver_like(first).or_else(|| Some(first.to_string()))
 }
 
 fn read_deno_version(exec: &Path) -> Option<String> {
@@ -748,13 +1066,44 @@ fn run_capture(program: &str, args: &[&str]) -> Option<String> {
 
 fn find_in_path(program: &str) -> Option<PathBuf> {
   let path = env::var_os("PATH")?;
-  for dir in env::split_paths(&path) {
-    let candidate = dir.join(program);
-    if is_executable(&candidate) {
-      return Some(candidate);
+  #[cfg(windows)]
+  {
+    let exts = env::var_os("PATHEXT")
+      .map(|x| x.to_string_lossy().to_string())
+      .unwrap_or_else(|| ".EXE;.CMD;.BAT;.COM".to_string());
+    let exts = exts
+      .split(';')
+      .map(|x| x.trim().to_string())
+      .filter(|x| !x.is_empty())
+      .collect::<Vec<_>>();
+    for dir in env::split_paths(&path) {
+      let raw = dir.join(program);
+      if is_executable(&raw) {
+        return Some(raw);
+      }
+      for ext in &exts {
+        let candidate = PathBuf::from(format!("{}{}", raw.to_string_lossy(), ext.to_lowercase()));
+        if is_executable(&candidate) {
+          return Some(candidate);
+        }
+        let candidate = PathBuf::from(format!("{}{}", raw.to_string_lossy(), ext));
+        if is_executable(&candidate) {
+          return Some(candidate);
+        }
+      }
     }
+    return None;
   }
-  None
+  #[cfg(not(windows))]
+  {
+    for dir in env::split_paths(&path) {
+      let candidate = dir.join(program);
+      if is_executable(&candidate) {
+        return Some(candidate);
+      }
+    }
+    None
+  }
 }
 
 fn is_executable(path: &Path) -> bool {
@@ -768,6 +1117,11 @@ fn is_executable(path: &Path) -> bool {
       return meta.permissions().mode() & 0o111 != 0;
     }
   }
+  #[cfg(windows)]
+  {
+    return true;
+  }
+  #[allow(unreachable_code)]
   false
 }
 

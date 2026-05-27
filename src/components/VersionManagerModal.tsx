@@ -24,12 +24,23 @@ const LANGUAGE_OPTIONS = [
   { value: 'node', label: 'Node.js' },
   { value: 'python', label: 'Python' },
   { value: 'rust', label: 'Rust' },
+  { value: 'java', label: 'Java' },
+  { value: 'bun', label: 'Bun' },
+  { value: 'deno', label: 'Deno' },
+  { value: 'go', label: 'Go' },
+  { value: 'php', label: 'PHP' },
 ]
 
 function installerOptions(language: string) {
   if (language === 'node') return ['fnm', 'nvm']
   if (language === 'python') return ['pyenv']
   if (language === 'rust') return ['rustup']
+  const isWin = navigator.userAgent.toLowerCase().includes('windows')
+  if (language === 'java') return isWin ? ['winget'] : ['sdkman', 'homebrew']
+  if (language === 'bun') return isWin ? ['winget'] : ['homebrew']
+  if (language === 'deno') return isWin ? ['winget'] : ['homebrew']
+  if (language === 'go') return isWin ? ['winget'] : ['goenv', 'homebrew']
+  if (language === 'php') return isWin ? ['winget'] : ['phpenv', 'homebrew']
   return []
 }
 
@@ -198,6 +209,20 @@ export function VersionManagerModal({
     }
   }, [items, onInstalled, statusMap])
 
+  const clearItems = useCallback(() => {
+    Modal.confirm({
+      title: '一键清空',
+      content: '确认清空当前配置文件的全部条目？',
+      okText: '清空',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk() {
+        setItems([])
+        setLog('已清空条目。')
+      },
+    })
+  }, [])
+
   return (
     <Modal open={open} title="语言版本管理" onCancel={onClose} footer={null} width={1040}>
       <div style={{ display: 'grid', gap: 12 }}>
@@ -227,6 +252,9 @@ export function VersionManagerModal({
             </Button>
             <Button type="primary" onClick={installAll} loading={installing} disabled={items.length === 0}>
               一键安装
+            </Button>
+            <Button danger onClick={clearItems} disabled={items.length === 0}>
+              一键清空
             </Button>
           </Space>
         </Space>
@@ -334,4 +362,3 @@ export function VersionManagerModal({
     </Modal>
   )
 }
-

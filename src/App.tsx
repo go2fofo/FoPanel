@@ -39,7 +39,7 @@ type SystemRuntime = {
   using_fopanel: boolean
 }
 
-const LANGUAGE_ORDER = ['python', 'node', 'bun', 'deno', 'go', 'rust', 'php']
+const LANGUAGE_ORDER = ['python', 'node', 'java', 'bun', 'deno', 'go', 'rust', 'php']
 
 function App() {
   const [loading, setLoading] = useState(false)
@@ -156,6 +156,10 @@ function App() {
     if (runtime.language === 'node' && (runtime.source === 'fnm' || runtime.source === 'nvm')) return true
     if (runtime.language === 'python' && runtime.source === 'pyenv') return true
     if (runtime.language === 'rust' && runtime.source === 'rustup') return true
+    if (runtime.language === 'go' && runtime.source === 'goenv') return true
+    if (runtime.language === 'php' && runtime.source === 'phpenv') return true
+    if (runtime.language === 'java' && (runtime.source === 'homebrew' || runtime.source === 'winget' || runtime.source === 'sdkman'))
+      return true
     return false
   }, [])
 
@@ -262,6 +266,7 @@ function App() {
 
   function displayName(lang: string) {
     if (lang === 'node') return 'Node.js'
+    if (lang === 'java') return 'Java'
     if (lang === 'bun') return 'Bun'
     if (lang === 'deno') return 'Deno'
     if (lang === 'rust') return 'Rust'
@@ -276,13 +281,19 @@ function App() {
     if (source === 'nvm') return 'nvm'
     if (source === 'pyenv') return 'pyenv'
     if (source === 'rustup') return 'rustup'
+    if (source === 'goenv') return 'goenv'
+    if (source === 'phpenv') return 'phpenv'
+    if (source === 'sdkman') return 'SDKMAN'
     if (source === 'homebrew') return 'Homebrew'
+    if (source === 'winget') return 'winget'
     if (source === 'framework') return '系统 Framework'
     if (source === 'standalone') return '独立安装'
     if (source === 'volta') return 'Volta'
     if (source === 'asdf') return 'asdf'
     if (source === 'manual') return '手动'
     if (source === 'path') return 'PATH'
+    if (source.startsWith('jvm-')) return `JVM(${source.slice(4)})`
+    if (source === 'jvm') return 'JVM'
     return source
   }
 
@@ -578,7 +589,12 @@ function App() {
               options={[
                 { value: 'node', label: 'node' },
                 { value: 'python', label: 'python' },
+                { value: 'java', label: 'java' },
+                { value: 'bun', label: 'bun' },
+                { value: 'deno', label: 'deno' },
+                { value: 'go', label: 'go' },
                 { value: 'rust', label: 'rust' },
+                { value: 'php', label: 'php' },
               ]}
             />
           </Form.Item>
@@ -603,7 +619,7 @@ function App() {
           ) : null}
 
           <Form.Item name="version" label="版本" rules={[{ required: true, message: '请输入版本' }]}>
-            <Input placeholder="例如：22.18.0 / 3.12.0 / stable" />
+            <Input placeholder="例如：22.18.0 / 3.12.0 / stable / latest / 8.4" />
           </Form.Item>
 
           <Typography.Text type="secondary">
@@ -627,6 +643,9 @@ function App() {
               options={[
                 { value: 'python', label: 'python' },
                 { value: 'node', label: 'node' },
+                { value: 'java', label: 'java' },
+                { value: 'bun', label: 'bun' },
+                { value: 'deno', label: 'deno' },
                 { value: 'go', label: 'go' },
                 { value: 'rust', label: 'rust' },
                 { value: 'php', label: 'php' },
