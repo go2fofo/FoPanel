@@ -1,0 +1,108 @@
+:root {
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji',
+    'Segoe UI Emoji', 'Segoe UI Symbol', sans-serif;
+  background: #050505;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(85, 199, 194, 0.42) rgba(255, 255, 255, 0.06);
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    180deg,
+    rgba(85, 199, 194, 0.46),
+    rgba(90, 140, 255, 0.38),
+    rgba(124, 115, 255, 0.40)
+  );
+  border: 2px solid rgba(5, 5, 5, 0.8);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(
+    180deg,
+    rgba(85, 199, 194, 0.62),
+    rgba(90, 140, 255, 0.50),
+    rgba(124, 115, 255, 0.52)
+  );
+}
+
+.ant-modal .ant-modal-content {
+  background:
+    radial-gradient(780px 260px at 16% 0%, rgba(85, 199, 194, 0.26), rgba(0, 0, 0, 0) 60%),
+    radial-gradient(760px 300px at 92% 0%, rgba(124, 115, 255, 0.22), rgba(0, 0, 0, 0) 62%),
+    linear-gradient(180deg, rgba(17, 24, 39, 0.92), rgba(2, 6, 23, 0.92));
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(85, 199, 194, 0.08) inset;
+  backdrop-filter: blur(14px);
+}
+
+.ant-modal .ant-modal-header {
+  background: transparent;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.ant-modal .ant-modal-title {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.ant-modal .ant-modal-close {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.ant-modal .ant-modal-footer {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.ant-modal .ant-modal-footer .ant-btn-default {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.ant-modal .ant-modal-footer .ant-btn-primary {
+  background: rgba(85, 199, 194, 0.20);
+  border-color: rgba(85, 199, 194, 0.34);
+}
+
+.ant-modal .ant-modal-mask {
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.ant-drawer .ant-drawer-content {
+  background:
+    radial-gradient(760px 260px at 18% 0%, rgba(85, 199, 194, 0.20), rgba(0, 0, 0, 0) 58%),
+    radial-gradient(760px 280px at 92% 0%, rgba(124, 115, 255, 0.16), rgba(0, 0, 0, 0) 60%),
+    rgba(15, 23, 42, 0.88);
+  border-left: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(14px);
+}
