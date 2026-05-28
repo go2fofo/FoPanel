@@ -1,7 +1,7 @@
 /*
  * @Author: fofo
  * @Date: 2026-05-26 15:51:07
- * @LastEditTime: 2026-05-26 16:17:33
+ * @LastEditTime: 2026-05-28 15:04:48
  * @LastEditors: fofo
  * @Description: 
  * @FilePath: /FoPanel/src/App.tsx
@@ -117,7 +117,7 @@ function App() {
       setRuntimes(list)
     } catch (e) {
       setRuntimes([])
-      openFeedback('error', '扫描失败', String(e))
+      // openFeedback('error', '扫描失败', String(e))
     } finally {
       setLoading(false)
     }
@@ -435,7 +435,7 @@ function App() {
       <Spin
         fullscreen
         spinning={busy > 0 || loading || installLoading || installSubmitting || manualSubmitting}
-        indicator={<LottiePlayer src="/lottie/fopanel_intro_anim.json" autoplay loop size={220} />}
+        indicator={<LottiePlayer src="/lottie/83627cee-1153-11ee-b832-fb1242dd7de9.lottie" autoplay loop size={220} />}
       />
       <div className="container">
         <header className="dashboard">

@@ -1,7 +1,7 @@
 /*
  * @Author: fofo
  * @Date: 2026-05-26 15:51:07
- * @LastEditTime: 2026-05-26 17:58:28
+ * @LastEditTime: 2026-05-28 14:58:55
  * @LastEditors: fofo
  * @Description: 
  * @FilePath: /FoPanel/src/main.tsx
@@ -13,6 +13,9 @@ import zhCN from 'antd/locale/zh_CN'
 import 'antd/dist/reset.css'
 import './index.css'
 import App from './App.tsx'
+import { setWasmUrl } from '@lottiefiles/dotlottie-react'
+
+setWasmUrl('/lottie/dotlottie-player.wasm')
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

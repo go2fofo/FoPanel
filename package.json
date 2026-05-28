@@ -14,6 +14,7 @@
   "dependencies": {
     "@ant-design/icons": "^6.2.3",
     "@lottiefiles/dotlottie-react": "^0.19.4",
+    "@lottiefiles/dotlottie-web": "^0.74.0",
     "@tauri-apps/api": "^2.11.0",
     "antd": "^6.4.3",
     "react": "^19.2.6",

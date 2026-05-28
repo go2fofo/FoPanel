@@ -1,3 +1,11 @@
+/*
+ * @Author: fofo
+ * @Date: 2026-05-28 14:19:52
+ * @LastEditTime: 2026-05-28 14:50:15
+ * @LastEditors: fofo
+ * @Description: 
+ * @FilePath: /FoPanel/src/components/LottiePlayer.tsx
+ */
 import { DotLottieReact } from '@lottiefiles/dotlottie-react'
 import type { ComponentProps, CSSProperties } from 'react'
 
