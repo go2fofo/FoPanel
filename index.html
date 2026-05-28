@@ -142,16 +142,20 @@
     <div id="root"></div>
     <script src="/lottie/lottie_light.min.js"></script>
     <script>
-      const container = document.getElementById('splash-lottie');
-      if (container) {
-        lottie.loadAnimation({
-          container: container,
-          renderer: 'svg',
-          loop: true,
-          autoplay: true,
-          path: '/lottie/splash.json'
-        });
-      }
+        // 避免等待 DOMContentLoaded，直接立即执行脚本，以最快速度加载动画
+      (function() {
+        const container = document.getElementById('splash-lottie');
+        if (container && window.lottie) {
+          const anim = window.lottie.loadAnimation({
+            container: container,
+            renderer: 'svg',
+            loop: true,
+            autoplay: true,
+            path: '/lottie/splash.json'
+          });
+          anim.setSpeed(1.5); // 加快播放速度
+        }
+      })();
     </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
