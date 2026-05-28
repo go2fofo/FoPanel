@@ -129,8 +129,7 @@
     <div id="preload-splash">
       <div class="preload-card">
         <div class="preload-inner">
-          <div class="preload-gif-wrap">
-            <canvas id="splash-canvas" width="280" height="200" style="display: block; object-fit: contain;"></canvas>
+          <div class="preload-gif-wrap" id="splash-lottie" style="width: 280px; height: 200px;">
           </div>
           <div class="preload-title">FoPanel</div>
           <div class="preload-subtitle">一体化开发环境工作台</div>
@@ -141,16 +140,16 @@
       </div>
     </div>
     <div id="root"></div>
-    <script type="module">
-      import { DotLottie } from "@lottiefiles/dotlottie-web";
-      DotLottie.setWasmUrl('/lottie/dotlottie-player.wasm');
-      const canvas = document.getElementById('splash-canvas');
-      if (canvas) {
-        new DotLottie({
-          canvas,
-          src: "/lottie/83627cee-1153-11ee-b832-fb1242dd7de9.lottie",
+    <script src="/lottie/lottie_light.min.js"></script>
+    <script>
+      const container = document.getElementById('splash-lottie');
+      if (container) {
+        lottie.loadAnimation({
+          container: container,
+          renderer: 'svg',
           loop: true,
           autoplay: true,
+          path: '/lottie/splash.json'
         });
       }
     </script>
