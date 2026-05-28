@@ -8,6 +8,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { homeDir } from '@tauri-apps/api/path'
 import {
   Button,
   Form,
@@ -21,6 +22,7 @@ import {
 } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { FeedbackModal, type FeedbackModalType } from './components/FeedbackModal'
+import { LottiePlayer } from './components/LottiePlayer'
 import {
   RuntimeDetailDrawer,
   type RuntimeDetail,
@@ -39,6 +41,12 @@ type SystemRuntime = {
   using_fopanel: boolean
 }
 
+type TerminalApp = {
+  id: string
+  label: string
+  installed: boolean
+}
+
 const LANGUAGE_ORDER = ['python', 'node', 'java', 'bun', 'deno', 'go', 'rust', 'php']
 
 function App() {
@@ -46,6 +54,8 @@ function App() {
   const [runtimes, setRuntimes] = useState<RuntimeVersion[]>([])
   const [systemRuntimes, setSystemRuntimes] = useState<Record<string, SystemRuntime>>({})
   const [busy, setBusy] = useState(0)
+  const [booting, setBooting] = useState(true)
+  const [introDone, setIntroDone] = useState(false)
 
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   const [feedbackType, setFeedbackType] = useState<FeedbackModalType>('info')
@@ -72,6 +82,12 @@ function App() {
 
   const [switchOpen, setSwitchOpen] = useState(false)
   const [switchLang, setSwitchLang] = useState<string>('')
+
+  const [terminalOpen, setTerminalOpen] = useState(false)
+  const [terminalLoading, setTerminalLoading] = useState(false)
+  const [terminalApps, setTerminalApps] = useState<TerminalApp[]>([])
+  const [terminalLang, setTerminalLang] = useState<string>('')
+  const [terminalAppId, setTerminalAppId] = useState<string>('')
 
   const openFeedback = useCallback((type: FeedbackModalType, title: string, content: string) => {
     setFeedbackType(type)
@@ -126,6 +142,47 @@ function App() {
     },
     [installForm, openFeedback],
   )
+
+  const terminalStorageKey = useMemo(() => {
+    const isWindows = /windows/i.test(navigator.userAgent)
+    return isWindows ? 'fopanel_terminal_app_win' : 'fopanel_terminal_app_mac'
+  }, [])
+
+  const openTerminalChooser = useCallback(
+    async (language: string) => {
+      setTerminalOpen(true)
+      setTerminalLang(language)
+      setTerminalLoading(true)
+      try {
+        const list = await invoke<TerminalApp[]>('list_terminal_apps')
+        setTerminalApps(list)
+        const installed = list.filter((x) => x.installed)
+        const saved = localStorage.getItem(terminalStorageKey) || ''
+        const pick =
+          (saved && installed.find((x) => x.id === saved)?.id) || (installed[0]?.id ?? list[0]?.id ?? '')
+        setTerminalAppId(pick)
+      } catch (e) {
+        setTerminalApps([])
+        setTerminalAppId('')
+        openFeedback('error', '加载终端列表失败', String(e))
+      } finally {
+        setTerminalLoading(false)
+      }
+    },
+    [openFeedback, terminalStorageKey],
+  )
+
+  const launchTerminal = useCallback(async () => {
+    if (!terminalAppId) return
+    try {
+      const dir = await homeDir()
+      await invoke('open_terminal', { appId: terminalAppId, language: terminalLang, dir })
+      localStorage.setItem(terminalStorageKey, terminalAppId)
+      setTerminalOpen(false)
+    } catch (e) {
+      openFeedback('error', '打开终端失败', String(e))
+    }
+  }, [openFeedback, terminalAppId, terminalLang, terminalStorageKey])
 
   const handleRemove = useCallback(
     async (runtime: RuntimeVersion) => {
@@ -298,12 +355,37 @@ function App() {
   }
 
   useEffect(() => {
-    const t = window.setTimeout(() => {
-      refreshRuntimes()
-      refreshSystemRuntimes()
-    }, 0)
-    return () => window.clearTimeout(t)
+    let disposed = false
+
+    const introTimer = window.setTimeout(() => {
+      if (!disposed) setIntroDone(true)
+    }, 1800)
+
+    ;(async () => {
+      try {
+        await Promise.all([refreshRuntimes(), refreshSystemRuntimes()])
+      } finally {
+        if (!disposed) setBooting(false)
+      }
+    })()
+
+    return () => {
+      disposed = true
+      window.clearTimeout(introTimer)
+    }
   }, [refreshRuntimes, refreshSystemRuntimes])
+
+  useEffect(() => {
+    if (booting) return
+    if (!introDone) return
+
+    const el = document.getElementById('preload-splash')
+    if (!el) return
+    el.classList.add('preload-hide')
+    window.setTimeout(() => {
+      el.remove()
+    }, 260)
+  }, [booting, introDone])
 
   const submitManual = useCallback(async () => {
     const values = await manualForm.validateFields()
@@ -350,7 +432,11 @@ function App() {
 
   return (
     <div className="page">
-      <Spin fullscreen spinning={busy > 0 || loading || installLoading || installSubmitting || manualSubmitting} />
+      <Spin
+        fullscreen
+        spinning={busy > 0 || loading || installLoading || installSubmitting || manualSubmitting}
+        indicator={<LottiePlayer src="/lottie/fopanel_intro_anim.json" autoplay loop size={220} />}
+      />
       <div className="container">
         <header className="dashboard">
           <div className="brand">
@@ -438,6 +524,16 @@ function App() {
                     }}
                   >
                     版本列表
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-manage"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      openTerminalChooser(lang)
+                    }}
+                  >
+                    终端
                   </button>
                   <button
                     type="button"
@@ -562,6 +658,34 @@ function App() {
             },
           ]}
         />
+      </Modal>
+
+      <Modal
+        open={terminalOpen}
+        title={`打开终端 · ${terminalLang ? displayName(terminalLang) : ''}`}
+        onCancel={() => setTerminalOpen(false)}
+        onOk={launchTerminal}
+        okText="打开"
+        cancelText="取消"
+        confirmLoading={terminalLoading}
+      >
+        <div style={{ display: 'grid', gap: 12 }}>
+          <Select
+            value={terminalAppId || undefined}
+            placeholder="选择终端"
+            options={terminalApps.map((x) => ({
+              value: x.id,
+              label: x.installed ? x.label : `${x.label}（未安装）`,
+              disabled: !x.installed,
+            }))}
+            onChange={(v) => {
+              const id = String(v)
+              setTerminalAppId(id)
+              localStorage.setItem(terminalStorageKey, id)
+            }}
+          />
+          <Typography.Text type="secondary">默认在用户目录打开</Typography.Text>
+        </div>
       </Modal>
 
       <Modal

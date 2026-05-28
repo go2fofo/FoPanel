@@ -1,4 +1,5 @@
 import { Button, Descriptions, Divider, Drawer, Space, Table, Tag, Typography } from 'antd'
+import { LottiePlayer } from './LottiePlayer'
 
 export type RuntimeVersion = {
   language: string
@@ -100,13 +101,27 @@ export function RuntimeDetailDrawer({ open, loading, detail, onClose, onCheckUpg
               { title: '版本', dataIndex: 'version', width: 160 },
             ]}
             dataSource={detail.packages}
-            loading={loading}
+            loading={
+              loading
+                ? {
+                    spinning: true,
+                    indicator: <LottiePlayer src="/lottie/loading-dots.json" autoplay loop size={64} />,
+                  }
+                : false
+            }
           />
         </Space>
       ) : (
-        <Typography.Text type="secondary">
-          {loading ? '加载中...' : '未选择运行时'}
-        </Typography.Text>
+        <div style={{ display: 'grid', placeItems: 'center', gap: 12, padding: '24px 0' }}>
+          {loading ? (
+            <LottiePlayer src="/lottie/loading-dots.json" autoplay loop size={120} />
+          ) : (
+            <LottiePlayer src="/lottie/empty-box.json" autoplay loop size={160} />
+          )}
+          <Typography.Text type="secondary">
+            {loading ? '加载中...' : '未选择运行时'}
+          </Typography.Text>
+        </div>
       )}
     </Drawer>
   )

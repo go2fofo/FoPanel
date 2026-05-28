@@ -12,9 +12,12 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "FoPanel",
-        "width": 800,
-        "height": 600,
+        "url": "index.html",
+        "width": 1200,
+        "height": 800,
+        "backgroundColor": "#050505",
         "resizable": true,
         "fullscreen": false
       }

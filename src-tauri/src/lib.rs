@@ -48,7 +48,9 @@ pub fn run() {
       commands::runtime_cmds::get_installer_overrides,
       commands::runtime_cmds::set_installer_override,
       commands::runtime_cmds::clear_installer_override,
-      commands::shell_cmds::shell_exec
+      commands::shell_cmds::shell_exec,
+      commands::shell_cmds::list_terminal_apps,
+      commands::shell_cmds::open_terminal
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
